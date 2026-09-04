@@ -22,14 +22,18 @@ fn capture_stack() {
         let args = CallArgs::from_vp(vp, argc);
 
         capture_stack!(&in(cx) let stack);
-        let str_stack = stack
-            .unwrap()
-            .as_string(None, StackFormat::SpiderMonkey)
-            .unwrap();
-        println!("{}", str_stack);
+        let mut stack = stack.unwrap();
+        let spider_monkey_stack = stack.as_string(None, StackFormat::SpiderMonkey).unwrap();
+        println!("{}", spider_monkey_stack);
         assert_eq!(
-            "bar@test.js:3:21\nfoo@test.js:5:17\n@test.js:8:16\n".to_string(),
-            str_stack
+            "bar@test.js:3:21\nfoo@test.js:5:17\n@test.js:8:16\n",
+            spider_monkey_stack
+        );
+
+        let webkit_stack = stack.as_string(None, StackFormat::WebKit).unwrap();
+        assert_eq!(
+            "bar@test.js:3:21\nfoo@test.js:5:17\nglobal code@test.js:8:16",
+            webkit_stack
         );
 
         args.rval().set(UndefinedValue());

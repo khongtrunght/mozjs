@@ -110,12 +110,18 @@ BEGIN_TEST(testSavedStacks_RangeBasedForLoops) {
       "    at two (filename.js:5:6)\n"
       "    at one (filename.js:6:4)\n"
       "    at filename.js:7:2";
+  static const char WebKitStack[] =
+      "three@filename.js:4:14\n"
+      "two@filename.js:5:6\n"
+      "one@filename.js:6:4\n"
+      "global code@filename.js:7:2";
   struct {
     js::StackFormat format;
     const char* expected;
   } expectations[] = {{js::StackFormat::Default, SpiderMonkeyStack},
                       {js::StackFormat::SpiderMonkey, SpiderMonkeyStack},
-                      {js::StackFormat::V8, V8Stack}};
+                      {js::StackFormat::V8, V8Stack},
+                      {js::StackFormat::WebKit, WebKitStack}};
   auto CheckStacks = [&]() {
     for (auto& expectation : expectations) {
       JS::RootedString str(cx);
@@ -200,6 +206,36 @@ BEGIN_TEST(testSavedStacks_ErrorStackV8) {
   return true;
 }
 END_TEST(testSavedStacks_ErrorStackV8)
+
+BEGIN_TEST(testSavedStacks_ErrorStackWebKit) {
+  js::SetStackFormat(cx, js::StackFormat::WebKit);
+
+  JS::RootedValue val(cx);
+  CHECK(
+      evaluate("(function one() {                      \n"   // 1
+               "  return (function two() {             \n"   // 2
+               "    return (function three() {         \n"   // 3
+               "      return new Error('foo');         \n"   // 4
+               "    }());                              \n"   // 5
+               "  }());                                \n"   // 6
+               "}()).stack                             \n",  // 7
+               "filename.js", 1, &val));
+
+  CHECK(val.isString());
+  JS::RootedString stack(cx, val.toString());
+
+  static const char WebKitStack[] =
+      "three@filename.js:4:14\n"
+      "two@filename.js:5:6\n"
+      "one@filename.js:6:4\n"
+      "global code@filename.js:7:2";
+  JSLinearString* lin = stack->ensureLinear(cx);
+  CHECK(lin);
+  CHECK(js::StringEqualsLiteral(lin, WebKitStack));
+
+  return true;
+}
+END_TEST(testSavedStacks_ErrorStackWebKit)
 
 BEGIN_TEST(testSavedStacks_selfHostedFrames) {
   CHECK(js::DefineTestingFunctions(cx, global, false, false));

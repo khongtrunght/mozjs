@@ -1,0 +1,130 @@
+diff --git a/js/public/Stack.h b/js/public/Stack.h
+index 7ab880b..5442b14 100644
+--- a/js/public/Stack.h
++++ b/js/public/Stack.h
+@@ -44,14 +44,14 @@ extern JS_PUBLIC_API void JS_SetNativeStackQuota(
+ 
+ namespace js {
+ 
+-enum class StackFormat { SpiderMonkey, V8, Default };
++enum class StackFormat { SpiderMonkey, V8, WebKit, Default };
+ 
+ /*
+  * Sets the format used for stringifying Error stacks.
+  *
+- * The default format is StackFormat::SpiderMonkey.  Use StackFormat::V8
+- * in order to emulate V8's stack formatting.  StackFormat::Default can't be
+- * used here.
++ * The default format is StackFormat::SpiderMonkey. Use StackFormat::V8 or
++ * StackFormat::WebKit to emulate the corresponding engine's stack formatting.
++ * StackFormat::Default can't be used here.
+  */
+ extern JS_PUBLIC_API void SetStackFormat(JSContext* cx, StackFormat format);
+ 
+diff --git a/js/src/jsapi-tests/testSavedStacks.cpp b/js/src/jsapi-tests/testSavedStacks.cpp
+index 518bee9..aaa4759 100644
+--- a/js/src/jsapi-tests/testSavedStacks.cpp
++++ b/js/src/jsapi-tests/testSavedStacks.cpp
+@@ -110,12 +110,18 @@ BEGIN_TEST(testSavedStacks_RangeBasedForLoops) {
+       "    at two (filename.js:5:6)\n"
+       "    at one (filename.js:6:4)\n"
+       "    at filename.js:7:2";
++  static const char WebKitStack[] =
++      "three@filename.js:4:14\n"
++      "two@filename.js:5:6\n"
++      "one@filename.js:6:4\n"
++      "global code@filename.js:7:2";
+   struct {
+     js::StackFormat format;
+     const char* expected;
+   } expectations[] = {{js::StackFormat::Default, SpiderMonkeyStack},
+                       {js::StackFormat::SpiderMonkey, SpiderMonkeyStack},
+-                      {js::StackFormat::V8, V8Stack}};
++                      {js::StackFormat::V8, V8Stack},
++                      {js::StackFormat::WebKit, WebKitStack}};
+   auto CheckStacks = [&]() {
+     for (auto& expectation : expectations) {
+       JS::RootedString str(cx);
+@@ -201,6 +207,36 @@ BEGIN_TEST(testSavedStacks_ErrorStackV8) {
+ }
+ END_TEST(testSavedStacks_ErrorStackV8)
+ 
++BEGIN_TEST(testSavedStacks_ErrorStackWebKit) {
++  js::SetStackFormat(cx, js::StackFormat::WebKit);
++
++  JS::RootedValue val(cx);
++  CHECK(
++      evaluate("(function one() {                      \n"   // 1
++               "  return (function two() {             \n"   // 2
++               "    return (function three() {         \n"   // 3
++               "      return new Error('foo');         \n"   // 4
++               "    }());                              \n"   // 5
++               "  }());                                \n"   // 6
++               "}()).stack                             \n",  // 7
++               "filename.js", 1, &val));
++
++  CHECK(val.isString());
++  JS::RootedString stack(cx, val.toString());
++
++  static const char WebKitStack[] =
++      "three@filename.js:4:14\n"
++      "two@filename.js:5:6\n"
++      "one@filename.js:6:4\n"
++      "global code@filename.js:7:2";
++  JSLinearString* lin = stack->ensureLinear(cx);
++  CHECK(lin);
++  CHECK(js::StringEqualsLiteral(lin, WebKitStack));
++
++  return true;
++}
++END_TEST(testSavedStacks_ErrorStackWebKit)
++
+ BEGIN_TEST(testSavedStacks_selfHostedFrames) {
+   CHECK(js::DefineTestingFunctions(cx, global, false, false));
+ 
+diff --git a/js/src/vm/SavedStacks.cpp b/js/src/vm/SavedStacks.cpp
+index 5b6573b..4ba03fd 100644
+--- a/js/src/vm/SavedStacks.cpp
++++ b/js/src/vm/SavedStacks.cpp
+@@ -1039,6 +1039,28 @@ static bool FormatV8StackFrame(JSContext* cx, js::StringBuilder& sb,
+          (lastFrame || sb.append('\n'));
+ }
+ 
++// Match JavaScriptCore's `StackFrame::toString` and
++// `Interpreter::stackTraceAsString`: `function@source:line:column`, with
++// `global code` for the bottom-level script frame and no trailing newline.
++// SavedFrame does not retain JavaScriptCore's eval/module/native frame kinds,
++// so those names cannot be distinguished here.
++static bool FormatWebKitStackFrame(JSContext* cx, js::StringBuilder& sb,
++                                   JS::Handle<js::SavedFrame*> frame,
++                                   size_t indent, bool skippedAsync,
++                                   bool lastFrame) {
++  RootedString asyncCause(cx, frame->getAsyncCause());
++  Rooted<JSAtom*> name(cx, frame->getFunctionDisplayName());
++  bool isAsync = asyncCause || skippedAsync;
++
++  return (!indent || sb.appendN(' ', indent)) &&
++         (!isAsync || sb.append("async ")) &&
++         (name ? sb.append(name)
++               : (!lastFrame || sb.append("global code"))) &&
++         sb.append('@') && sb.append(frame->getSource()) && sb.append(':') &&
++         FormatStackFrameLine(sb, frame) && sb.append(':') &&
++         FormatStackFrameColumn(sb, frame) && (lastFrame || sb.append('\n'));
++}
++
+ JS_PUBLIC_API bool BuildStackString(JSContext* cx, JSPrincipals* principals,
+                                     HandleObject stack,
+                                     MutableHandleString stringp, size_t indent,
+@@ -1093,6 +1115,12 @@ JS_PUBLIC_API bool BuildStackString(JSContext* cx, JSPrincipals* principals,
+             return false;
+           }
+           break;
++        case js::StackFormat::WebKit:
++          if (!FormatWebKitStackFrame(cx, sb, frame, indent, skippedAsync,
++                                      !nextFrame)) {
++            return false;
++          }
++          break;
+         case js::StackFormat::Default:
+           MOZ_CRASH("Unexpected value");
+           break;

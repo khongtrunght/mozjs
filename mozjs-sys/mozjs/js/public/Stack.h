@@ -44,14 +44,14 @@ extern JS_PUBLIC_API void JS_SetNativeStackQuota(
 
 namespace js {
 
-enum class StackFormat { SpiderMonkey, V8, Default };
+enum class StackFormat { SpiderMonkey, V8, WebKit, Default };
 
 /*
  * Sets the format used for stringifying Error stacks.
  *
- * The default format is StackFormat::SpiderMonkey.  Use StackFormat::V8
- * in order to emulate V8's stack formatting.  StackFormat::Default can't be
- * used here.
+ * The default format is StackFormat::SpiderMonkey. Use StackFormat::V8 or
+ * StackFormat::WebKit to emulate the corresponding engine's stack formatting.
+ * StackFormat::Default can't be used here.
  */
 extern JS_PUBLIC_API void SetStackFormat(JSContext* cx, StackFormat format);
 

@@ -1039,6 +1039,28 @@ static bool FormatV8StackFrame(JSContext* cx, js::StringBuilder& sb,
          (lastFrame || sb.append('\n'));
 }
 
+// Match JavaScriptCore's `StackFrame::toString` and
+// `Interpreter::stackTraceAsString`: `function@source:line:column`, with
+// `global code` for the bottom-level script frame and no trailing newline.
+// SavedFrame does not retain JavaScriptCore's eval/module/native frame kinds,
+// so those names cannot be distinguished here.
+static bool FormatWebKitStackFrame(JSContext* cx, js::StringBuilder& sb,
+                                   JS::Handle<js::SavedFrame*> frame,
+                                   size_t indent, bool skippedAsync,
+                                   bool lastFrame) {
+  RootedString asyncCause(cx, frame->getAsyncCause());
+  Rooted<JSAtom*> name(cx, frame->getFunctionDisplayName());
+  bool isAsync = asyncCause || skippedAsync;
+
+  return (!indent || sb.appendN(' ', indent)) &&
+         (!isAsync || sb.append("async ")) &&
+         (name ? sb.append(name)
+               : (!lastFrame || sb.append("global code"))) &&
+         sb.append('@') && sb.append(frame->getSource()) && sb.append(':') &&
+         FormatStackFrameLine(sb, frame) && sb.append(':') &&
+         FormatStackFrameColumn(sb, frame) && (lastFrame || sb.append('\n'));
+}
+
 JS_PUBLIC_API bool BuildStackString(JSContext* cx, JSPrincipals* principals,
                                     HandleObject stack,
                                     MutableHandleString stringp, size_t indent,
@@ -1090,6 +1112,12 @@ JS_PUBLIC_API bool BuildStackString(JSContext* cx, JSPrincipals* principals,
           break;
         case js::StackFormat::V8:
           if (!FormatV8StackFrame(cx, sb, frame, indent, !nextFrame)) {
+            return false;
+          }
+          break;
+        case js::StackFormat::WebKit:
+          if (!FormatWebKitStackFrame(cx, sb, frame, indent, skippedAsync,
+                                      !nextFrame)) {
             return false;
           }
           break;
