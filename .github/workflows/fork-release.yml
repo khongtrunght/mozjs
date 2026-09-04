@@ -1,0 +1,47 @@
+name: Fork prebuilt archives
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish or replace the fork GitHub release assets"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: ${{ github.repository == 'khongtrunght/mozjs' }}
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+
+  publish-github-release:
+    name: Publish fork release
+    if: ${{ github.repository == 'khongtrunght/mozjs' && (github.event_name == 'push' || inputs.publish_release) }}
+    runs-on: ubuntu-latest
+    needs: ["build"]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Publish archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_TAG=mozjs-sys-v$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[] | select(.name == "mozjs_sys") | .version')
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" ./*.tar.gz --clobber
+          else
+            gh release create "${RELEASE_TAG}" ./*.tar.gz \
+              --target "${GITHUB_SHA}" \
+              --title "mozjs_sys ${RELEASE_TAG#mozjs-sys-v} with WebKit stack format" \
+              --notes "Fork build with js::StackFormat::WebKit for Servo integration."
+          fi

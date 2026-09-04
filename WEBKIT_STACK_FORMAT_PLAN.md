@@ -5,7 +5,7 @@
 - Upstream: `https://github.com/servo/mozjs`
 - Fork: `https://github.com/khongtrunght/mozjs`
 - Working branch: `webkit-stack-format`
-- SpiderMonkey snapshot: ESR 153 (`mozjs_sys` `153.0.0-0`)
+- SpiderMonkey snapshot: ESR 153 (`mozjs_sys` `153.0.0-1`)
 
 The branch adds `js::StackFormat::WebKit`. It formats ordinary saved frames like JavaScriptCore:
 
@@ -29,6 +29,8 @@ SpiderMonkey `SavedFrame` does not retain all JavaScriptCore frame metadata. The
 ## Remote-machine source build
 
 Use a machine with ample CPU, RAM, and at least 20 GB of free disk space.
+SpiderMonkey ESR 153 requires Clang/LLVM 19 or newer; ensure `clang`,
+`clang++`, `llvm-objdump`, and `libclang` come from that toolchain.
 
 ```bash
 git clone --branch webkit-stack-format \
@@ -79,7 +81,20 @@ gh run download RUN_ID \
   --dir ./mozjs-artifacts
 ```
 
-Do not merge directly to `main` yet. The inherited `publish.yml` runs on pushes to `main` and includes a crates.io publishing job intended for the upstream Servo repository.
+The fork-specific `fork-release.yml` runs the same build matrix after a merge to
+`main`, then creates (or refreshes) the matching GitHub release. The inherited
+`publish.yml` is guarded so its crates.io publishing pipeline only runs in
+`servo/mozjs`.
+
+The fork workflow can also be run manually. Set `publish_release` to `true` to
+publish the successful archives; leave it false for temporary Actions artifacts:
+
+```bash
+gh workflow run fork-release.yml \
+  --repo khongtrunght/mozjs \
+  --ref main \
+  -f publish_release=true
+```
 
 ## Consume a downloaded prebuilt archive
 
@@ -93,10 +108,10 @@ MOZJS_ARCHIVE=/absolute/path/to/libmozjs-TARGET.tar.gz \
 To host reusable archives, create a GitHub release named for the current `mozjs_sys` version and upload the CI archives:
 
 ```bash
-gh release create mozjs-sys-v153.0.0-0 \
+gh release create mozjs-sys-v153.0.0-1 \
   ./mozjs-artifacts/**/*.tar.gz \
   --repo khongtrunght/mozjs \
-  --title 'mozjs_sys 153.0.0-0 with WebKit stack format'
+  --title 'mozjs_sys 153.0.0-1 with WebKit stack format'
 ```
 
 Consumers can then use:

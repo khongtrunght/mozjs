@@ -11,6 +11,9 @@ on:
 # dispatches build workflow with different permissions
 jobs:
   build:
+    # Forks must not run Servo's crates.io publishing pipeline on their main
+    # branch. They can provide their own archive/release workflow instead.
+    if: ${{ github.repository == 'servo/mozjs' }}
     uses: ./.github/workflows/build.yml
     with:
       # We verify in this workflow after creating the github release.
