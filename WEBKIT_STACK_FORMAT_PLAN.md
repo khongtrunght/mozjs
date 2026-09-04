@@ -125,18 +125,30 @@ Leave `MOZJS_ATTESTATION` disabled for fork artifacts for now: the current attes
 
 ## Servo integration after the archive passes
 
-Point Servo at the fork or a local checkout and select the format after each runtime is created:
+Point Servo's workspace `js` dependency at the tested fork revision (preserving
+Servo's existing feature selection):
+
+```toml
+js = { package = "mozjs", git = "https://github.com/khongtrunght/mozjs", rev = "9fa14ae5b18ea0868e85423cff6d5097d14d5662", default-features = false, features = ["intl", "libz-sys"] }
+```
+
+Then select the format after each runtime is created:
 
 ```rust
-use js::jsapi::{SetStackFormat, StackFormat};
+use js::jsapi::StackFormat;
+use js::rust::wrappers2::SetStackFormat;
 
 let cx = runtime.cx();
 unsafe {
-    SetStackFormat(&cx, StackFormat::WebKit);
+    SetStackFormat(cx, StackFormat::WebKit);
 }
 ```
 
 The insertion point is `components/script/runtime/script_runtime.rs`, immediately after `let cx = runtime.cx();` in `Runtime::new_with_parent()`. This path covers the main script runtime and child worker runtimes.
+
+Set `MOZJS_ARCHIVE=https://github.com/khongtrunght/mozjs/releases` in
+Servo's build environment so `mozjs_sys` downloads the matching prebuilt
+archive. Keep `MOZJS_ATTESTATION` unset or set it to `off` for this fork.
 
 ## Verification checklist
 
