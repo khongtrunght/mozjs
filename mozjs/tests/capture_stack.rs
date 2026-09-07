@@ -13,7 +13,7 @@ use mozjs::rooted;
 use mozjs::rust::wrappers2::{JS_DefineFunction, JS_NewGlobalObject};
 use mozjs::rust::wrappers2::{RunJobs, SetStackFormat, UseInternalJobQueues};
 use mozjs::rust::{
-    evaluate_script, CompileOptionsWrapper, JSEngine, RealmOptions, Runtime, SIMPLE_GLOBAL_CLASS,
+    evaluate_script, CompileOptionsWrapper, JSEngine, RealmOptions, SIMPLE_GLOBAL_CLASS,
 };
 
 #[test]
@@ -42,9 +42,30 @@ fn capture_stack() {
         true
     }
 
-    let engine = JSEngine::init().unwrap();
-    let mut runtime = Runtime::new(engine.handle());
-    let context = runtime.cx();
+    // Internal job queues must be installed before self-hosting, earlier than
+    // Runtime::new permits. Keep this test's low-level context RAII-owned.
+    struct TestContext(NonNull<JSContext>);
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            unsafe { mozjs::jsapi::JS_DestroyContext(self.0.as_ptr()) };
+        }
+    }
+    let _engine = JSEngine::init().unwrap();
+    let owned_context = TestContext(
+        NonNull::new(unsafe { mozjs::jsapi::JS_NewContext(32 * 1024 * 1024, ptr::null_mut()) })
+            .unwrap(),
+    );
+    let mut context = unsafe { mozjs::context::JSContext::from_ptr(owned_context.0) };
+    let context = &mut context;
+    unsafe {
+        assert!(UseInternalJobQueues(context));
+        mozjs::jsapi::JS_SetNativeStackQuota(context.raw_cx(), 1024 * 1024, 0, 0);
+        assert!(mozjs::jsapi::InitSelfHostedCode(
+            context.raw_cx(),
+            Default::default(),
+            None
+        ));
+    }
     #[cfg(feature = "debugmozjs")]
     unsafe {
         mozjs::jsapi::SetGCZeal(context.raw_cx(), 2, 1);
@@ -121,6 +142,21 @@ fn capture_stack() {
                 "var o = {}; o.m = function() { return new Error().stack; };\no.m()",
                 "    at o.m (v8_frames.js:1:39)",
             ),
+            (
+                "nested_property",
+                "function outer() { var o = {}; o.m = function() { return new Error().stack; }; return o.m(); } outer()",
+                "    at o.m (v8_frames.js:1:58)",
+            ),
+            (
+                "returned_anonymous",
+                "var f = (function() { return function() { return new Error().stack; }; })(); f()",
+                "    at v8_frames.js:1:50",
+            ),
+            (
+                "plain_constructor_call",
+                "function C() { return new Error().stack; } C()",
+                "    at C (v8_frames.js:1:23)",
+            ),
             // SavedFrame deliberately does not inspect or retain receivers.
             (
                 "class_method",
@@ -147,7 +183,6 @@ fn capture_stack() {
             assert_eq!(frame, expected, "{label}");
         }
 
-        assert!(UseInternalJobQueues(context));
         let options = CompileOptionsWrapper::new(context, c"v8_async.js".to_owned(), 1);
         evaluate_script(context, global.handle(),
             "async function leaf() { await 0; return new Error().stack; }\nasync function fn() { return await leaf(); }\nvar asyncStack; fn().then(s => { asyncStack = s; });",

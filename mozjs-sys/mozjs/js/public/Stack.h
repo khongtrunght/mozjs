@@ -52,6 +52,13 @@ enum class StackFormat { SpiderMonkey, V8, WebKit, Default };
  * The default format is StackFormat::SpiderMonkey. Use StackFormat::V8 or
  * StackFormat::WebKit to emulate the corresponding engine's stack formatting.
  * StackFormat::Default can't be used here.
+ * V8 mode retains constructor calls, omits anonymous function names, and uses
+ * explicit / ECMAScript-inferred names or directly assigned property paths,
+ * rather than expression-contribution guesses. SavedFrame has no receiver
+ * metadata, so class/object methods print "m", not "C.m" / "Object.m".
+ * Async parent frames carry an "async " prefix, with SpiderMonkey's source
+ * coordinates and async ancestry. This is formatting compatibility, not an
+ * implementation of V8's CallSite objects or async stack reconstruction.
  */
 extern JS_PUBLIC_API void SetStackFormat(JSContext* cx, StackFormat format);
 
