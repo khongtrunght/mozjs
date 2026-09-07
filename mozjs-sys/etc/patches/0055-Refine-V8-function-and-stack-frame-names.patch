@@ -1,0 +1,525 @@
+diff --git a/js/src/frontend/NameFunctions.cpp b/js/src/frontend/NameFunctions.cpp
+index 1370605..0f61a46 100644
+--- a/js/src/frontend/NameFunctions.cpp
++++ b/js/src/frontend/NameFunctions.cpp
+@@ -365,6 +365,17 @@ class NameResolver : public ParseNodeVisitor<NameResolver> {
+     // computed inferred name.
+     if (!funNode->isDirectRHSAnonFunction()) {
+       funbox->setGuessedAtom(*retId);
++      // Only a direct assignment can supply an inferred stack-frame name.
++      // In particular, do not treat an IIFE's result or a returned function
++      // as the right-hand-side function of an enclosing assignment.
++      if (nparents_ >= 2) {
++        ParseNode* parent = parents_[nparents_ - 2];
++        if (parent->is<AssignmentNode>() &&
++            parent->as<AssignmentNode>().right() == funNode &&
++            parent->as<AssignmentNode>().left()->isKind(ParseNodeKind::DotExpr)) {
++          funbox->setHasPropertyAssignmentName();
++        }
++      }
+     }
+     return true;
+   }
+diff --git a/js/src/frontend/SharedContext.h b/js/src/frontend/SharedContext.h
+index 9ccfa82..011ec49 100644
+--- a/js/src/frontend/SharedContext.h
++++ b/js/src/frontend/SharedContext.h
+@@ -593,6 +593,13 @@ class FunctionBox : public SuspendableContext {
+     }
+   }
+ 
++  void setHasPropertyAssignmentName() {
++    immutableFlags_.setFlag(ImmutableFlags::HasPropertyAssignmentName);
++    if (isScriptExtraFieldCopiedToStencil) {
++      copyUpdatedImmutableFlags();
++    }
++  }
++
+   bool needsHomeObject() const {
+     return hasFlag(ImmutableFlags::NeedsHomeObject);
+   }
+diff --git a/js/src/jsapi-tests/testFunctionProperties.cpp b/js/src/jsapi-tests/testFunctionProperties.cpp
+index 104fbba..1cf4e8f 100644
+--- a/js/src/jsapi-tests/testFunctionProperties.cpp
++++ b/js/src/jsapi-tests/testFunctionProperties.cpp
+@@ -25,6 +25,19 @@ END_TEST(testFunctionProperties)
+ 
+ BEGIN_TEST(testNativeFunctionSourceFormat) {
+   JS::RootedValue result(cx);
++  JS::SetNativeFunctionSourceFormat(cx, JS::NativeFunctionSourceFormat::V8);
++  EVAL(
++      "var getter = Object.getOwnPropertyDescriptor(Map.prototype, 'size').get;"
++      "var setter = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__').set;"
++      "var firstGetter = getter.toString(), firstSetter = setter.toString();"
++      "getter.name; setter.name;"
++      "firstGetter === 'function get size() { [native code] }' && "
++      "firstSetter === 'function set __proto__() { [native code] }' && "
++      "firstGetter === getter.toString() && firstSetter === setter.toString()",
++      &result);
++  CHECK(result.toBoolean());
++  JS::SetNativeFunctionSourceFormat(
++      cx, JS::NativeFunctionSourceFormat::SpiderMonkey);
+   EVAL(
+       "eval.toString() === 'function eval() {\\n    [native code]\\n}' && "
+       "(function(){}).bind(null).toString() === "
+diff --git a/js/src/jsapi-tests/testSavedStacks.cpp b/js/src/jsapi-tests/testSavedStacks.cpp
+index aaa4759..97df658 100644
+--- a/js/src/jsapi-tests/testSavedStacks.cpp
++++ b/js/src/jsapi-tests/testSavedStacks.cpp
+@@ -430,3 +430,57 @@ BEGIN_TEST(test_GetPendingExceptionStack) {
+   return true;
+ }
+ END_TEST(test_GetPendingExceptionStack)
++
++BEGIN_TEST(testSavedStacks_V8FrameIdentity) {
++  js::SetStackFormat(cx, js::StackFormat::V8);
++  JS::RootedValue value(cx);
++  struct {
++    const char* source;
++    const char* expected;
++  } cases[] = {
++      {"function C() { this.stack = new Error().stack; }\nnew C().stack",
++       "    at new C (v8_frames.js:1:29)"},
++      {"new (function() { this.stack = new Error().stack; })().stack",
++       "    at new <anonymous> (v8_frames.js:1:32)"},
++      {"var stack = (function() { return new Error().stack; })(); stack",
++       "    at v8_frames.js:1:34"},
++      {"var f = function() { return new Error().stack; };\nf()",
++       "    at f (v8_frames.js:1:29)"},
++      {"var o = {}; o.m = function() { return new Error().stack; };\no.m()",
++       "    at o.m (v8_frames.js:1:39)"},
++      {"var stack; async function fn() { stack = new Error().stack; } fn(); stack",
++       "    at fn (v8_frames.js:1:42)"},
++  };
++  for (const auto& test : cases) {
++    CHECK(evaluate(test.source, "v8_frames.js", 1, &value));
++    JS::RootedString stack(cx, value.toString());
++    JSLinearString* linear = stack->ensureLinear(cx);
++    CHECK(linear);
++    // Compare the first frame independently of the embedding's caller stack.
++    JS::UniqueChars bytes = JS_EncodeStringToUTF8(cx, stack);
++    CHECK(bytes);
++    const char* first = strchr(bytes.get(), '\n');
++    CHECK(first);
++    CHECK(strncmp(first + 1, test.expected, strlen(test.expected)) == 0);
++    CHECK(first[1 + strlen(test.expected)] == '\n' ||
++          first[1 + strlen(test.expected)] == '\0');
++  }
++
++  CHECK(evaluate(
++      "async function leaf() { await 0; return new Error().stack; }\n"
++      "async function fn() { return await leaf(); }\n"
++      "var asyncStack; fn().then(s => { asyncStack = s; });",
++      "v8_async.js", 1, &value));
++  js::RunJobs(cx);
++  EVAL("asyncStack.includes('\\n    at async fn (v8_async.js:2:35)')", &value);
++  CHECK(value.toBoolean());
++  CHECK(js::DefineTestingFunctions(cx, global, false, false));
++  EVAL(
++      "function CloneCtor() { this.error = new Error(); }"
++      "var original = new CloneCtor().error;"
++      "deserialize(serialize(original)).stack === original.stack",
++      &value);
++  CHECK(value.toBoolean());
++  return true;
++}
++END_TEST(testSavedStacks_V8FrameIdentity)
+diff --git a/js/src/vm/JSFunction.cpp b/js/src/vm/JSFunction.cpp
+index 6121ea5..b4977ed 100644
+--- a/js/src/vm/JSFunction.cpp
++++ b/js/src/vm/JSFunction.cpp
+@@ -952,8 +952,11 @@ JSString* js::FunctionToString(JSContext* cx, HandleFunction fun,
+         return nullptr;
+       }
+ 
+-      // V8 preserves native accessor prefixes; SpiderMonkey strips them.
+-      JSAtom* name = fun->maybePartialExplicitName();
++      // Resolve lazy accessor prefixes before the first V8 toString call.
++      Rooted<JSAtom*> name(cx, fun->maybePartialExplicitName());
++      if (useV8Format && !fun->getExplicitName(cx, &name)) {
++        return nullptr;
++      }
+       size_t offset = !useV8Format && hasGetterOrSetterPrefix(name) ? 4 : 0;
+       if (!out.appendSubstring(name, offset, name->length() - offset)) {
+         return nullptr;
+diff --git a/js/src/vm/SavedFrame.h b/js/src/vm/SavedFrame.h
+index f5b41ef..d777397 100644
+--- a/js/src/vm/SavedFrame.h
++++ b/js/src/vm/SavedFrame.h
+@@ -52,6 +52,8 @@ class SavedFrame : public NativeObject {
+   // Column number in UTF-16 code units.
+   JS::TaggedColumnNumberOneOrigin getColumn();
+   JSAtom* getFunctionDisplayName();
++  JSAtom* getV8FunctionName();
++  bool isConstructing();
+   JSAtom* getAsyncCause();
+   SavedFrame* getParent() const;
+   JSPrincipals* getPrincipals();
+@@ -124,6 +126,8 @@ class SavedFrame : public NativeObject {
+   void initLine(uint32_t line);
+   void initColumn(JS::TaggedColumnNumberOneOrigin column);
+   void initFunctionDisplayName(JSAtom* maybeName);
++  void initV8FunctionName(JSAtom* maybeName);
++  void initIsConstructing(bool constructing);
+   void initAsyncCause(JSAtom* maybeCause);
+   void initParent(SavedFrame* maybeParent);
+   void initPrincipalsAlreadyHeldAndMutedErrors(JSPrincipals* principals,
+@@ -137,6 +141,8 @@ class SavedFrame : public NativeObject {
+     JSSLOT_LINE,
+     JSSLOT_COLUMN,
+     JSSLOT_FUNCTIONDISPLAYNAME,
++    JSSLOT_V8FUNCTIONNAME,
++    JSSLOT_ISCONSTRUCTING,
+     JSSLOT_ASYNCCAUSE,
+     JSSLOT_PARENT,
+     JSSLOT_PRINCIPALS,
+diff --git a/js/src/vm/SavedStacks.cpp b/js/src/vm/SavedStacks.cpp
+index 4ba03fd..e40a836 100644
+--- a/js/src/vm/SavedStacks.cpp
++++ b/js/src/vm/SavedStacks.cpp
+@@ -176,12 +176,15 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
+          JSAtom* asyncCause, SavedFrame* parent, JSPrincipals* principals,
+          bool mutedErrors,
+          const Maybe<LiveSavedFrameCache::FramePtr>& framePtr = Nothing(),
+-         jsbytecode* pc = nullptr, Activation* activation = nullptr)
++         jsbytecode* pc = nullptr, Activation* activation = nullptr,
++         JSAtom* v8FunctionName = nullptr, bool isConstructing = false)
+       : source(source),
+         sourceId(sourceId),
+         line(line),
+         column(column),
+         functionDisplayName(functionDisplayName),
++        v8FunctionName(v8FunctionName),
++        isConstructing(isConstructing),
+         asyncCause(asyncCause),
+         parent(parent),
+         principals(principals),
+@@ -202,6 +205,8 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
+         line(savedFrame.getLine()),
+         column(savedFrame.getColumn()),
+         functionDisplayName(savedFrame.getFunctionDisplayName()),
++        v8FunctionName(savedFrame.getV8FunctionName()),
++        isConstructing(savedFrame.isConstructing()),
+         asyncCause(savedFrame.getAsyncCause()),
+         parent(savedFrame.getParent()),
+         principals(savedFrame.getPrincipals()),
+@@ -222,6 +227,8 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
+   JS::TaggedColumnNumberOneOrigin column;
+ 
+   JSAtom* functionDisplayName;
++  JSAtom* v8FunctionName;
++  bool isConstructing;
+   JSAtom* asyncCause;
+   SavedFrame* parent;
+   JSPrincipals* principals;
+@@ -237,6 +244,7 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
+     TraceRoot(trc, &source, "SavedFrame::Lookup::source");
+     TraceRoot(trc, &functionDisplayName,
+               "SavedFrame::Lookup::functionDisplayName");
++    TraceRoot(trc, &v8FunctionName, "SavedFrame::Lookup::v8FunctionName");
+     TraceRoot(trc, &asyncCause, "SavedFrame::Lookup::asyncCause");
+     TraceRoot(trc, &parent, "SavedFrame::Lookup::parent");
+   }
+@@ -257,6 +265,8 @@ class WrappedPtrOperations<SavedFrame::Lookup, Wrapper> {
+   uint32_t line() { return value().line; }
+   JS::TaggedColumnNumberOneOrigin column() { return value().column; }
+   JSAtom* functionDisplayName() { return value().functionDisplayName; }
++  JSAtom* v8FunctionName() { return value().v8FunctionName; }
++  bool isConstructing() { return value().isConstructing; }
+   JSAtom* asyncCause() { return value().asyncCause; }
+   SavedFrame* parent() { return value().parent; }
+   JSPrincipals* principals() { return value().principals; }
+@@ -313,7 +323,8 @@ HashNumber SavedFrame::HashPolicy::calculateHash(const Lookup& lookup,
+   // interest.  If that assumption changes, we'll just need to start with 0
+   // and add another overload of AddToHash with more arguments.
+   return AddToHash(lookup.line, lookup.column.rawValue(), lookup.source,
+-                   lookup.functionDisplayName, lookup.asyncCause,
++                   lookup.functionDisplayName, lookup.v8FunctionName,
++                   lookup.isConstructing, lookup.asyncCause,
+                    lookup.mutedErrors, parentHash,
+                    JSPrincipalsPtrHasher::hash(lookup.principals));
+ }
+@@ -348,6 +359,11 @@ bool SavedFrame::HashPolicy::match(SavedFrame* existing, const Lookup& lookup) {
+     return false;
+   }
+ 
++  if (existing->getV8FunctionName() != lookup.v8FunctionName ||
++      existing->isConstructing() != lookup.isConstructing) {
++    return false;
++  }
++
+   JSAtom* asyncCause = existing->getAsyncCause();
+   if (asyncCause != lookup.asyncCause) {
+     return false;
+@@ -465,6 +481,16 @@ JSAtom* SavedFrame::getFunctionDisplayName() {
+   return &s->asAtom();
+ }
+ 
++JSAtom* SavedFrame::getV8FunctionName() {
++  const Value& v = getReservedSlot(JSSLOT_V8FUNCTIONNAME);
++  return v.isString() ? &v.toString()->asAtom() : nullptr;
++}
++
++bool SavedFrame::isConstructing() {
++  const Value& v = getReservedSlot(JSSLOT_ISCONSTRUCTING);
++  return v.isBoolean() && v.toBoolean();
++}
++
+ JSAtom* SavedFrame::getAsyncCause() {
+   const Value& v = getReservedSlot(JSSLOT_ASYNCCAUSE);
+   if (v.isNull()) {
+@@ -536,6 +562,15 @@ void SavedFrame::initFunctionDisplayName(JSAtom* maybeName) {
+                    maybeName ? StringValue(maybeName) : NullValue());
+ }
+ 
++void SavedFrame::initV8FunctionName(JSAtom* maybeName) {
++  initReservedSlot(JSSLOT_V8FUNCTIONNAME,
++                   maybeName ? StringValue(maybeName) : NullValue());
++}
++
++void SavedFrame::initIsConstructing(bool constructing) {
++  initReservedSlot(JSSLOT_ISCONSTRUCTING, BooleanValue(constructing));
++}
++
+ void SavedFrame::initAsyncCause(JSAtom* maybeCause) {
+   initReservedSlot(JSSLOT_ASYNCCAUSE,
+                    maybeCause ? StringValue(maybeCause) : NullValue());
+@@ -557,6 +592,9 @@ void SavedFrame::initFromLookup(JSContext* cx, Handle<Lookup> lookup) {
+   if (lookup.functionDisplayName()) {
+     cx->markAtom(lookup.functionDisplayName());
+   }
++  if (lookup.v8FunctionName()) {
++    cx->markAtom(lookup.v8FunctionName());
++  }
+   if (lookup.asyncCause()) {
+     cx->markAtom(lookup.asyncCause());
+   }
+@@ -566,6 +604,8 @@ void SavedFrame::initFromLookup(JSContext* cx, Handle<Lookup> lookup) {
+   initLine(lookup.line());
+   initColumn(lookup.column());
+   initFunctionDisplayName(lookup.functionDisplayName());
++  initV8FunctionName(lookup.v8FunctionName());
++  initIsConstructing(lookup.isConstructing());
+   initAsyncCause(lookup.asyncCause());
+   initParent(lookup.parent());
+   initPrincipalsAndMutedErrors(lookup.principals(), lookup.mutedErrors());
+@@ -1029,13 +1069,23 @@ static bool FormatSpiderMonkeyStackFrame(JSContext* cx, js::StringBuilder& sb,
+ static bool FormatV8StackFrame(JSContext* cx, js::StringBuilder& sb,
+                                JS::Handle<js::SavedFrame*> frame, size_t indent,
+                                bool lastFrame) {
+-  Rooted<JSAtom*> name(cx, frame->getFunctionDisplayName());
+-  return sb.appendN(' ', indent + 4) && sb.append('a') && sb.append('t') &&
+-         sb.append(' ') &&
+-         (!name || (sb.append(name) && sb.append(' ') && sb.append('('))) &&
++  // SavedFrame has no receiver/type metadata. Method frames use the explicit
++  // or inferred function name, without a receiver-derived "C." / "Object."
++  // prefix. Inspecting receivers here would require retaining live objects and
++  // potentially invoking user code; formatting a saved stack must do neither.
++  Rooted<JSAtom*> name(cx, frame->getV8FunctionName());
++  bool named = name && name->length();
++  bool constructing = frame->isConstructing();
++  bool parentheses = named || constructing;
++  return sb.appendN(' ', indent + 4) && sb.append("at ") &&
++         (!frame->getAsyncCause() || sb.append("async ")) &&
++         (!constructing || sb.append("new ")) &&
++         (!named || sb.append(name)) &&
++         (!constructing || named || sb.append("<anonymous>")) &&
++         (!parentheses || sb.append(" (")) &&
+          sb.append(frame->getSource()) && sb.append(':') &&
+          FormatStackFrameLine(sb, frame) && sb.append(':') &&
+-         FormatStackFrameColumn(sb, frame) && (!name || sb.append(')')) &&
++         FormatStackFrameColumn(sb, frame) && (!parentheses || sb.append(')')) &&
+          (lastFrame || sb.append('\n'));
+ }
+ 
+@@ -1506,6 +1556,7 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
+   RootedField<JSAtom*, 2> displayAtom(roots);
+   RootedField<JSAtom*, 3> causeAtom(roots);
+   RootedField<SavedFrame*> asyncParent(roots);
++  Rooted<JSAtom*> v8Name(cx);
+ 
+   while (!iter.done()) {
+     Activation& activation = *iter.activation();
+@@ -1578,6 +1629,37 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
+     }
+ 
+     displayAtom = iter.maybeFunctionDisplayAtom();
++    v8Name = displayAtom;
++    bool constructing = false;
++    if (iter.isFunctionFrame() && !iter.isWasm()) {
++      JSFunction* fun = iter.calleeTemplate();
++      constructing = iter.isConstructing();
++      v8Name = fun->fullExplicitOrInferredName();
++      if (fun->hasGuessedAtom() &&
++          iter.script()->hasFlag(
++              ImmutableScriptFlagsEnum::HasPropertyAssignmentName)) {
++        // NameFunctions qualifies diagnostics with enclosing scopes separated
++        // by '/'. Only retain the directly assigned property path.
++        size_t start = 0;
++        for (size_t i = 0; i < displayAtom->length(); i++) {
++          if (displayAtom->latin1OrTwoByteChar(i) == '/') {
++            start = i + 1;
++          }
++        }
++        v8Name = displayAtom;
++        if (start) {
++          RootedString name(cx, NewDependentString(
++              cx, displayAtom, start, displayAtom->length() - start));
++          if (!name) {
++            return false;
++          }
++          v8Name = AtomizeString(cx, name);
++        }
++        if (!v8Name) {
++          return false;
++        }
++      }
++    }
+ 
+     auto principals = iter.realm()->principals();
+     MOZ_ASSERT_IF(framePtr && !iter.isWasm(), iter.pc());
+@@ -1592,7 +1674,7 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
+                                   nullptr,  // asyncCause
+                                   nullptr,  // parent (not known yet)
+                                   principals, iter.mutedErrors(), framePtr,
+-                                  iter.pc(), &activation)) {
++                                  iter.pc(), &activation, v8Name, constructing)) {
+         return false;
+       }
+     }
+diff --git a/js/src/vm/StencilEnums.h b/js/src/vm/StencilEnums.h
+index 3fcd62d..7860fd9 100644
+--- a/js/src/vm/StencilEnums.h
++++ b/js/src/vm/StencilEnums.h
+@@ -254,6 +254,10 @@ enum class ImmutableScriptFlagsEnum : uint32_t {
+   // Whether this is a self-hosted function that uses the ArgumentsLength or
+   // GetArgument intrinsic.
+   UsesArgumentsIntrinsics = 1 << 30,
++
++  // The diagnostic atom came directly from a property assignment, not from
++  // SpiderMonkey's enclosing-scope or expression-contribution name guesses.
++  HasPropertyAssignmentName = 1U << 31,
+ };
+ 
+ enum class MutableScriptFlagsEnum : uint32_t {
+diff --git a/js/src/vm/StructuredClone.cpp b/js/src/vm/StructuredClone.cpp
+index c21b2e0..f05ce70 100644
+--- a/js/src/vm/StructuredClone.cpp
++++ b/js/src/vm/StructuredClone.cpp
+@@ -147,6 +147,7 @@ enum StructuredDataType : uint32_t {
+   SCTAG_RESIZABLE_ARRAY_BUFFER_OBJECT,
+   SCTAG_GROWABLE_SHARED_ARRAY_BUFFER_OBJECT,
+   SCTAG_IMMUTABLE_ARRAY_BUFFER_OBJECT,
++  SCTAG_SAVED_FRAME_OBJECT_V2,
+ 
+   SCTAG_TYPED_ARRAY_V1_MIN = 0xFFFF0100,
+   SCTAG_TYPED_ARRAY_V1_INT8 = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::Int8,
+@@ -475,7 +476,8 @@ struct JSStructuredCloneReader {
+ 
+   // A serialized SavedFrame contains primitive values in a header followed by
+   // an optional parent frame that is read recursively.
+-  [[nodiscard]] JSObject* readSavedFrameHeader(uint32_t principalsTag);
++  [[nodiscard]] JSObject* readSavedFrameHeader(uint32_t principalsTag,
++                                              bool hasV8Metadata);
+   [[nodiscard]] bool readSavedFrameFields(Handle<SavedFrame*> frameObj,
+                                           HandleValue parent, bool* state);
+ 
+@@ -1870,25 +1872,25 @@ bool JSStructuredCloneWriter::traverseSavedFrame(HandleObject obj) {
+ 
+   if (savedFrame->getPrincipals() ==
+       &ReconstructedSavedFramePrincipals::IsSystem) {
+-    if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT,
++    if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT_V2,
+                        SCTAG_RECONSTRUCTED_SAVED_FRAME_PRINCIPALS_IS_SYSTEM)) {
+       return false;
+     };
+   } else if (savedFrame->getPrincipals() ==
+              &ReconstructedSavedFramePrincipals::IsNotSystem) {
+     if (!out.writePair(
+-            SCTAG_SAVED_FRAME_OBJECT,
++            SCTAG_SAVED_FRAME_OBJECT_V2,
+             SCTAG_RECONSTRUCTED_SAVED_FRAME_PRINCIPALS_IS_NOT_SYSTEM)) {
+       return false;
+     }
+   } else {
+     if (auto principals = savedFrame->getPrincipals()) {
+-      if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT, SCTAG_JSPRINCIPALS) ||
++      if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT_V2, SCTAG_JSPRINCIPALS) ||
+           !principals->write(context(), this)) {
+         return false;
+       }
+     } else {
+-      if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT, SCTAG_NULL_JSPRINCIPALS)) {
++      if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT_V2, SCTAG_NULL_JSPRINCIPALS)) {
+         return false;
+       }
+     }
+@@ -1938,6 +1940,19 @@ bool JSStructuredCloneWriter::traverseSavedFrame(HandleObject obj) {
+     return false;
+   }
+ 
++  auto v8Name = savedFrame->getV8FunctionName();
++  if (v8Name) {
++    context()->markAtom(v8Name);
++  }
++  val = v8Name ? StringValue(v8Name) : NullValue();
++  if (!writePrimitive(val)) {
++    return false;
++  }
++  val = BooleanValue(savedFrame->isConstructing());
++  if (!writePrimitive(val)) {
++    return false;
++  }
++
+   return true;
+ }
+ 
+@@ -3379,8 +3394,9 @@ bool JSStructuredCloneReader::startReadUnchecked(
+       break;
+     }
+ 
+-    case SCTAG_SAVED_FRAME_OBJECT: {
+-      auto* obj = readSavedFrameHeader(data);
++    case SCTAG_SAVED_FRAME_OBJECT:
++    case SCTAG_SAVED_FRAME_OBJECT_V2: {
++      auto* obj = readSavedFrameHeader(data, tag == SCTAG_SAVED_FRAME_OBJECT_V2);
+       if (!obj || !objs.append(ObjectValue(*obj)) ||
+           !objState.append(std::make_pair(obj, false))) {
+         return false;
+@@ -3716,7 +3732,7 @@ bool JSStructuredCloneReader::readTransferMap() {
+ }
+ 
+ JSObject* JSStructuredCloneReader::readSavedFrameHeader(
+-    uint32_t principalsTag) {
++    uint32_t principalsTag, bool hasV8Metadata) {
+   Rooted<SavedFrame*> savedFrame(context(), SavedFrame::create(context()));
+   if (!savedFrame) {
+     return nullptr;
+@@ -3838,6 +3854,27 @@ JSObject* JSStructuredCloneReader::readSavedFrameHeader(
+   }
+   savedFrame->initAsyncCause(atomCause);
+ 
++  if (hasV8Metadata) {
++    RootedValue v8Name(context());
++    RootedValue constructing(context());
++    if (!startRead(&v8Name, AtomizeStrings) || !startRead(&constructing)) {
++      return nullptr;
++    }
++    if (!(v8Name.isString() || v8Name.isNull()) || !constructing.isBoolean()) {
++      JS_ReportErrorNumberASCII(context(), GetErrorMessage, nullptr,
++                                JSMSG_SC_BAD_SERIALIZED_DATA,
++                                "invalid saved frame V8 metadata");
++      return nullptr;
++    }
++    savedFrame->initV8FunctionName(
++        v8Name.isString() ? &v8Name.toString()->asAtom() : nullptr);
++    savedFrame->initIsConstructing(constructing.toBoolean());
++  } else {
++    // Old serialized stacks have no reliable name provenance or call kind.
++    savedFrame->initV8FunctionName(nullptr);
++    savedFrame->initIsConstructing(false);
++  }
++
+   return savedFrame;
+ }
+ 

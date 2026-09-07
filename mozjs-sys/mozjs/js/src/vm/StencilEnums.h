@@ -254,6 +254,10 @@ enum class ImmutableScriptFlagsEnum : uint32_t {
   // Whether this is a self-hosted function that uses the ArgumentsLength or
   // GetArgument intrinsic.
   UsesArgumentsIntrinsics = 1 << 30,
+
+  // The diagnostic atom came directly from a property assignment, not from
+  // SpiderMonkey's enclosing-scope or expression-contribution name guesses.
+  HasPropertyAssignmentName = 1U << 31,
 };
 
 enum class MutableScriptFlagsEnum : uint32_t {

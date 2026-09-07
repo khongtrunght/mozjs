@@ -15,8 +15,8 @@ jobs:
     if: ${{ github.event_name != 'push' }}
     uses: ./.github/workflows/build.yml
     with:
-      macos_arm64_only: ${{ github.ref_name == 'v8-identity' }}
-      verify_artifacts: ${{ github.ref_name != 'v8-identity' }}
+      macos_arm64_only: ${{ startsWith(github.ref_name, 'v8-identity') }}
+      verify_artifacts: ${{ !startsWith(github.ref_name, 'v8-identity') }}
     secrets: inherit
   latest_stable_rust:
     if: ${{ github.event_name == 'schedule' }}

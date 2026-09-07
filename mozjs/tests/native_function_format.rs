@@ -33,6 +33,34 @@ fn native_function_format() {
         let mut realm = AutoRealm::new_from_handle(context, global.handle());
         let context = &mut realm;
         rooted!(&in(context) let mut result = UndefinedValue());
+        // Do not warm the accessor names with name/toSource/toString first.
+        SetNativeFunctionSourceFormat(context, NativeFunctionSourceFormat::V8);
+        for (expression, expected) in [
+            (
+                "Object.getOwnPropertyDescriptor(Map.prototype, 'size').get",
+                "function get size() { [native code] }",
+            ),
+            (
+                "Object.getOwnPropertyDescriptor(Object.prototype, '__proto__').set",
+                "function set __proto__() { [native code] }",
+            ),
+        ] {
+            let script = format!("var accessor = {expression}; var first = accessor.toString(); accessor.name; first + '|' + accessor.toString()");
+            let options =
+                CompileOptionsWrapper::new(context, c"native_function_format.js".to_owned(), 1);
+            evaluate_script(
+                context,
+                global.handle(),
+                &script,
+                result.handle_mut(),
+                options,
+            )
+            .unwrap();
+            let actual = jsstr_to_string(context, NonNull::new(result.get().to_string()).unwrap());
+            assert_eq!(actual, format!("{expected}|{expected}"));
+            println!("V8 first-call accessor: {actual:?}");
+        }
+        SetNativeFunctionSourceFormat(context, NativeFunctionSourceFormat::SpiderMonkey);
         let setup = r#"
             var bound = (function named() {}).bind(null);
             var getter = Object.getOwnPropertyDescriptor(Map.prototype, 'size').get;

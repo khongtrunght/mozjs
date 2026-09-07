@@ -365,6 +365,17 @@ class NameResolver : public ParseNodeVisitor<NameResolver> {
     // computed inferred name.
     if (!funNode->isDirectRHSAnonFunction()) {
       funbox->setGuessedAtom(*retId);
+      // Only a direct assignment can supply an inferred stack-frame name.
+      // In particular, do not treat an IIFE's result or a returned function
+      // as the right-hand-side function of an enclosing assignment.
+      if (nparents_ >= 2) {
+        ParseNode* parent = parents_[nparents_ - 2];
+        if (parent->is<AssignmentNode>() &&
+            parent->as<AssignmentNode>().right() == funNode &&
+            parent->as<AssignmentNode>().left()->isKind(ParseNodeKind::DotExpr)) {
+          funbox->setHasPropertyAssignmentName();
+        }
+      }
     }
     return true;
   }

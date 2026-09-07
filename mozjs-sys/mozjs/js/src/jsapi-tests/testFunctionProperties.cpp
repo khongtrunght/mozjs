@@ -25,6 +25,19 @@ END_TEST(testFunctionProperties)
 
 BEGIN_TEST(testNativeFunctionSourceFormat) {
   JS::RootedValue result(cx);
+  JS::SetNativeFunctionSourceFormat(cx, JS::NativeFunctionSourceFormat::V8);
+  EVAL(
+      "var getter = Object.getOwnPropertyDescriptor(Map.prototype, 'size').get;"
+      "var setter = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__').set;"
+      "var firstGetter = getter.toString(), firstSetter = setter.toString();"
+      "getter.name; setter.name;"
+      "firstGetter === 'function get size() { [native code] }' && "
+      "firstSetter === 'function set __proto__() { [native code] }' && "
+      "firstGetter === getter.toString() && firstSetter === setter.toString()",
+      &result);
+  CHECK(result.toBoolean());
+  JS::SetNativeFunctionSourceFormat(
+      cx, JS::NativeFunctionSourceFormat::SpiderMonkey);
   EVAL(
       "eval.toString() === 'function eval() {\\n    [native code]\\n}' && "
       "(function(){}).bind(null).toString() === "

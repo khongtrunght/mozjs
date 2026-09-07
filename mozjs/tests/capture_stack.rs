@@ -5,11 +5,13 @@
 use std::ptr::{self, NonNull};
 
 use mozjs::capture_stack;
+use mozjs::conversions::jsstr_to_string;
 use mozjs::jsapi::{CallArgs, JSContext, OnNewGlobalHookOption, StackFormat, Value};
 use mozjs::jsval::UndefinedValue;
 use mozjs::realm::AutoRealm;
 use mozjs::rooted;
 use mozjs::rust::wrappers2::{JS_DefineFunction, JS_NewGlobalObject};
+use mozjs::rust::wrappers2::{RunJobs, SetStackFormat, UseInternalJobQueues};
 use mozjs::rust::{
     evaluate_script, CompileOptionsWrapper, JSEngine, RealmOptions, Runtime, SIMPLE_GLOBAL_CLASS,
 };
@@ -91,5 +93,77 @@ fn capture_stack() {
             options
         )
         .is_ok());
+
+        SetStackFormat(context, StackFormat::V8);
+        let cases = [
+            (
+                "constructor",
+                "function C() { this.stack = new Error().stack; }\nnew C().stack",
+                "    at new C (v8_frames.js:1:29)",
+            ),
+            (
+                "anonymous_constructor",
+                "new (function() { this.stack = new Error().stack; })().stack",
+                "    at new <anonymous> (v8_frames.js:1:32)",
+            ),
+            (
+                "iife",
+                "var stack = (function() { return new Error().stack; })(); stack",
+                "    at v8_frames.js:1:34",
+            ),
+            (
+                "variable",
+                "var f = function() { return new Error().stack; };\nf()",
+                "    at f (v8_frames.js:1:29)",
+            ),
+            (
+                "property",
+                "var o = {}; o.m = function() { return new Error().stack; };\no.m()",
+                "    at o.m (v8_frames.js:1:39)",
+            ),
+            // SavedFrame deliberately does not inspect or retain receivers.
+            (
+                "class_method",
+                "{ class C { m() { return new Error().stack; } } new C().m(); }",
+                "    at m (v8_frames.js:1:26)",
+            ),
+            (
+                "object_method",
+                "var o = { m() { return new Error().stack; } };\no.m()",
+                "    at m (v8_frames.js:1:24)",
+            ),
+            (
+                "async_direct",
+                "var stack; async function fn() { stack = new Error().stack; } fn(); stack",
+                "    at fn (v8_frames.js:1:42)",
+            ),
+        ];
+        for (label, script, expected) in cases {
+            let options = CompileOptionsWrapper::new(context, c"v8_frames.js".to_owned(), 1);
+            evaluate_script(context, global.handle(), script, rval.handle_mut(), options).unwrap();
+            let stack = jsstr_to_string(context, NonNull::new(rval.get().to_string()).unwrap());
+            let frame = stack.lines().nth(1).unwrap();
+            println!("V8 {label}: {frame:?}");
+            assert_eq!(frame, expected, "{label}");
+        }
+
+        assert!(UseInternalJobQueues(context));
+        let options = CompileOptionsWrapper::new(context, c"v8_async.js".to_owned(), 1);
+        evaluate_script(context, global.handle(),
+            "async function leaf() { await 0; return new Error().stack; }\nasync function fn() { return await leaf(); }\nvar asyncStack; fn().then(s => { asyncStack = s; });",
+            rval.handle_mut(), options).unwrap();
+        RunJobs(context);
+        let options = CompileOptionsWrapper::new(context, c"read_async.js".to_owned(), 1);
+        evaluate_script(
+            context,
+            global.handle(),
+            "asyncStack",
+            rval.handle_mut(),
+            options,
+        )
+        .unwrap();
+        let stack = jsstr_to_string(context, NonNull::new(rval.get().to_string()).unwrap());
+        println!("V8 async continuation: {stack:?}");
+        assert!(stack.contains("\n    at async fn (v8_async.js:2:35)"));
     }
 }

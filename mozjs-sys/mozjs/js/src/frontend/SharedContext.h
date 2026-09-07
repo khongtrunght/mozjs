@@ -593,6 +593,13 @@ class FunctionBox : public SuspendableContext {
     }
   }
 
+  void setHasPropertyAssignmentName() {
+    immutableFlags_.setFlag(ImmutableFlags::HasPropertyAssignmentName);
+    if (isScriptExtraFieldCopiedToStencil) {
+      copyUpdatedImmutableFlags();
+    }
+  }
+
   bool needsHomeObject() const {
     return hasFlag(ImmutableFlags::NeedsHomeObject);
   }

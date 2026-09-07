@@ -52,6 +52,8 @@ class SavedFrame : public NativeObject {
   // Column number in UTF-16 code units.
   JS::TaggedColumnNumberOneOrigin getColumn();
   JSAtom* getFunctionDisplayName();
+  JSAtom* getV8FunctionName();
+  bool isConstructing();
   JSAtom* getAsyncCause();
   SavedFrame* getParent() const;
   JSPrincipals* getPrincipals();
@@ -124,6 +126,8 @@ class SavedFrame : public NativeObject {
   void initLine(uint32_t line);
   void initColumn(JS::TaggedColumnNumberOneOrigin column);
   void initFunctionDisplayName(JSAtom* maybeName);
+  void initV8FunctionName(JSAtom* maybeName);
+  void initIsConstructing(bool constructing);
   void initAsyncCause(JSAtom* maybeCause);
   void initParent(SavedFrame* maybeParent);
   void initPrincipalsAlreadyHeldAndMutedErrors(JSPrincipals* principals,
@@ -137,6 +141,8 @@ class SavedFrame : public NativeObject {
     JSSLOT_LINE,
     JSSLOT_COLUMN,
     JSSLOT_FUNCTIONDISPLAYNAME,
+    JSSLOT_V8FUNCTIONNAME,
+    JSSLOT_ISCONSTRUCTING,
     JSSLOT_ASYNCCAUSE,
     JSSLOT_PARENT,
     JSSLOT_PRINCIPALS,

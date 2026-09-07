@@ -430,3 +430,57 @@ BEGIN_TEST(test_GetPendingExceptionStack) {
   return true;
 }
 END_TEST(test_GetPendingExceptionStack)
+
+BEGIN_TEST(testSavedStacks_V8FrameIdentity) {
+  js::SetStackFormat(cx, js::StackFormat::V8);
+  JS::RootedValue value(cx);
+  struct {
+    const char* source;
+    const char* expected;
+  } cases[] = {
+      {"function C() { this.stack = new Error().stack; }\nnew C().stack",
+       "    at new C (v8_frames.js:1:29)"},
+      {"new (function() { this.stack = new Error().stack; })().stack",
+       "    at new <anonymous> (v8_frames.js:1:32)"},
+      {"var stack = (function() { return new Error().stack; })(); stack",
+       "    at v8_frames.js:1:34"},
+      {"var f = function() { return new Error().stack; };\nf()",
+       "    at f (v8_frames.js:1:29)"},
+      {"var o = {}; o.m = function() { return new Error().stack; };\no.m()",
+       "    at o.m (v8_frames.js:1:39)"},
+      {"var stack; async function fn() { stack = new Error().stack; } fn(); stack",
+       "    at fn (v8_frames.js:1:42)"},
+  };
+  for (const auto& test : cases) {
+    CHECK(evaluate(test.source, "v8_frames.js", 1, &value));
+    JS::RootedString stack(cx, value.toString());
+    JSLinearString* linear = stack->ensureLinear(cx);
+    CHECK(linear);
+    // Compare the first frame independently of the embedding's caller stack.
+    JS::UniqueChars bytes = JS_EncodeStringToUTF8(cx, stack);
+    CHECK(bytes);
+    const char* first = strchr(bytes.get(), '\n');
+    CHECK(first);
+    CHECK(strncmp(first + 1, test.expected, strlen(test.expected)) == 0);
+    CHECK(first[1 + strlen(test.expected)] == '\n' ||
+          first[1 + strlen(test.expected)] == '\0');
+  }
+
+  CHECK(evaluate(
+      "async function leaf() { await 0; return new Error().stack; }\n"
+      "async function fn() { return await leaf(); }\n"
+      "var asyncStack; fn().then(s => { asyncStack = s; });",
+      "v8_async.js", 1, &value));
+  js::RunJobs(cx);
+  EVAL("asyncStack.includes('\\n    at async fn (v8_async.js:2:35)')", &value);
+  CHECK(value.toBoolean());
+  CHECK(js::DefineTestingFunctions(cx, global, false, false));
+  EVAL(
+      "function CloneCtor() { this.error = new Error(); }"
+      "var original = new CloneCtor().error;"
+      "deserialize(serialize(original)).stack === original.stack",
+      &value);
+  CHECK(value.toBoolean());
+  return true;
+}
+END_TEST(testSavedStacks_V8FrameIdentity)

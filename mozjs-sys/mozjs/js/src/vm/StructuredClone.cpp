@@ -147,6 +147,7 @@ enum StructuredDataType : uint32_t {
   SCTAG_RESIZABLE_ARRAY_BUFFER_OBJECT,
   SCTAG_GROWABLE_SHARED_ARRAY_BUFFER_OBJECT,
   SCTAG_IMMUTABLE_ARRAY_BUFFER_OBJECT,
+  SCTAG_SAVED_FRAME_OBJECT_V2,
 
   SCTAG_TYPED_ARRAY_V1_MIN = 0xFFFF0100,
   SCTAG_TYPED_ARRAY_V1_INT8 = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::Int8,
@@ -475,7 +476,8 @@ struct JSStructuredCloneReader {
 
   // A serialized SavedFrame contains primitive values in a header followed by
   // an optional parent frame that is read recursively.
-  [[nodiscard]] JSObject* readSavedFrameHeader(uint32_t principalsTag);
+  [[nodiscard]] JSObject* readSavedFrameHeader(uint32_t principalsTag,
+                                              bool hasV8Metadata);
   [[nodiscard]] bool readSavedFrameFields(Handle<SavedFrame*> frameObj,
                                           HandleValue parent, bool* state);
 
@@ -1870,25 +1872,25 @@ bool JSStructuredCloneWriter::traverseSavedFrame(HandleObject obj) {
 
   if (savedFrame->getPrincipals() ==
       &ReconstructedSavedFramePrincipals::IsSystem) {
-    if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT,
+    if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT_V2,
                        SCTAG_RECONSTRUCTED_SAVED_FRAME_PRINCIPALS_IS_SYSTEM)) {
       return false;
     };
   } else if (savedFrame->getPrincipals() ==
              &ReconstructedSavedFramePrincipals::IsNotSystem) {
     if (!out.writePair(
-            SCTAG_SAVED_FRAME_OBJECT,
+            SCTAG_SAVED_FRAME_OBJECT_V2,
             SCTAG_RECONSTRUCTED_SAVED_FRAME_PRINCIPALS_IS_NOT_SYSTEM)) {
       return false;
     }
   } else {
     if (auto principals = savedFrame->getPrincipals()) {
-      if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT, SCTAG_JSPRINCIPALS) ||
+      if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT_V2, SCTAG_JSPRINCIPALS) ||
           !principals->write(context(), this)) {
         return false;
       }
     } else {
-      if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT, SCTAG_NULL_JSPRINCIPALS)) {
+      if (!out.writePair(SCTAG_SAVED_FRAME_OBJECT_V2, SCTAG_NULL_JSPRINCIPALS)) {
         return false;
       }
     }
@@ -1934,6 +1936,19 @@ bool JSStructuredCloneWriter::traverseSavedFrame(HandleObject obj) {
     context()->markAtom(cause);
   }
   val = cause ? StringValue(cause) : NullValue();
+  if (!writePrimitive(val)) {
+    return false;
+  }
+
+  auto v8Name = savedFrame->getV8FunctionName();
+  if (v8Name) {
+    context()->markAtom(v8Name);
+  }
+  val = v8Name ? StringValue(v8Name) : NullValue();
+  if (!writePrimitive(val)) {
+    return false;
+  }
+  val = BooleanValue(savedFrame->isConstructing());
   if (!writePrimitive(val)) {
     return false;
   }
@@ -3379,8 +3394,9 @@ bool JSStructuredCloneReader::startReadUnchecked(
       break;
     }
 
-    case SCTAG_SAVED_FRAME_OBJECT: {
-      auto* obj = readSavedFrameHeader(data);
+    case SCTAG_SAVED_FRAME_OBJECT:
+    case SCTAG_SAVED_FRAME_OBJECT_V2: {
+      auto* obj = readSavedFrameHeader(data, tag == SCTAG_SAVED_FRAME_OBJECT_V2);
       if (!obj || !objs.append(ObjectValue(*obj)) ||
           !objState.append(std::make_pair(obj, false))) {
         return false;
@@ -3716,7 +3732,7 @@ bool JSStructuredCloneReader::readTransferMap() {
 }
 
 JSObject* JSStructuredCloneReader::readSavedFrameHeader(
-    uint32_t principalsTag) {
+    uint32_t principalsTag, bool hasV8Metadata) {
   Rooted<SavedFrame*> savedFrame(context(), SavedFrame::create(context()));
   if (!savedFrame) {
     return nullptr;
@@ -3837,6 +3853,27 @@ JSObject* JSStructuredCloneReader::readSavedFrameHeader(
     atomCause = &cause.toString()->asAtom();
   }
   savedFrame->initAsyncCause(atomCause);
+
+  if (hasV8Metadata) {
+    RootedValue v8Name(context());
+    RootedValue constructing(context());
+    if (!startRead(&v8Name, AtomizeStrings) || !startRead(&constructing)) {
+      return nullptr;
+    }
+    if (!(v8Name.isString() || v8Name.isNull()) || !constructing.isBoolean()) {
+      JS_ReportErrorNumberASCII(context(), GetErrorMessage, nullptr,
+                                JSMSG_SC_BAD_SERIALIZED_DATA,
+                                "invalid saved frame V8 metadata");
+      return nullptr;
+    }
+    savedFrame->initV8FunctionName(
+        v8Name.isString() ? &v8Name.toString()->asAtom() : nullptr);
+    savedFrame->initIsConstructing(constructing.toBoolean());
+  } else {
+    // Old serialized stacks have no reliable name provenance or call kind.
+    savedFrame->initV8FunctionName(nullptr);
+    savedFrame->initIsConstructing(false);
+  }
 
   return savedFrame;
 }

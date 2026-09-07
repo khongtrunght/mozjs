@@ -952,8 +952,11 @@ JSString* js::FunctionToString(JSContext* cx, HandleFunction fun,
         return nullptr;
       }
 
-      // V8 preserves native accessor prefixes; SpiderMonkey strips them.
-      JSAtom* name = fun->maybePartialExplicitName();
+      // Resolve lazy accessor prefixes before the first V8 toString call.
+      Rooted<JSAtom*> name(cx, fun->maybePartialExplicitName());
+      if (useV8Format && !fun->getExplicitName(cx, &name)) {
+        return nullptr;
+      }
       size_t offset = !useV8Format && hasGetterOrSetterPrefix(name) ? 4 : 0;
       if (!out.appendSubstring(name, offset, name->length() - offset)) {
         return nullptr;
