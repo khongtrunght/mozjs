@@ -1644,6 +1644,9 @@ bool CompilationSyntaxParseCache::copyScriptInfo(
     data.functionFlags = fun->flags();
 
     BaseScript* lazy = fun->baseScript();
+    if (lazy->hasFlag(MutableScriptFlagsEnum::HasPropertyAssignmentName)) {
+      data.setHasPropertyAssignmentName();
+    }
     extra.immutableFlags = lazy->immutableFlags();
     extra.extent = lazy->extent();
 
@@ -1722,6 +1725,9 @@ bool CompilationSyntaxParseCache::copyScriptInfo(
       data.functionAtom = displayAtom;
     }
     data.functionFlags = srcData.functionFlags;
+    if (srcData.hasPropertyAssignmentName()) {
+      data.setHasPropertyAssignmentName();
+    }
 
     extra = inner.scriptExtra();
   }
@@ -2500,6 +2506,11 @@ static void UpdateEmittedInnerFunctions(JSContext* cx,
     auto& fun = item.function;
     if (!scriptStencil.wasEmittedByEnclosingScript()) {
       continue;
+    }
+
+    if (scriptStencil.hasPropertyAssignmentName() && fun->hasBaseScript()) {
+      fun->baseScript()->setFlag(
+          MutableScriptFlagsEnum::HasPropertyAssignmentName);
     }
 
     if (scriptStencil.functionFlags.isAsmJSNative() ||
@@ -5907,6 +5918,10 @@ static void MergeScriptStencil(ScriptStencil& dest, const ScriptStencil& src,
     //       src.wasEmittedByEnclosingScript() == false, and that shouldn't
     //       be copied.
     dest.setWasEmittedByEnclosingScript();
+  }
+
+  if (src.hasPropertyAssignmentName()) {
+    dest.setHasPropertyAssignmentName();
   }
 
   if (src.allowRelazify()) {

@@ -411,6 +411,10 @@ void FunctionBox::copyUpdatedAtomAndFlags() {
   script.functionFlags = flags_;
 }
 
+void FunctionBox::setHasPropertyAssignmentName() {
+  functionStencil().setHasPropertyAssignmentName();
+}
+
 void FunctionBox::copyUpdatedWasEmitted() {
   ScriptStencil& script = functionStencil();
   if (wasEmittedByEnclosingScript_) {

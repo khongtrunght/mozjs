@@ -38,24 +38,110 @@ index 1370605..0f61a46 100644
      }
      return true;
    }
+diff --git a/js/src/frontend/SharedContext.cpp b/js/src/frontend/SharedContext.cpp
+index 9420b9d..a7ddc7b 100644
+--- a/js/src/frontend/SharedContext.cpp
++++ b/js/src/frontend/SharedContext.cpp
+@@ -411,6 +411,10 @@ void FunctionBox::copyUpdatedAtomAndFlags() {
+   script.functionFlags = flags_;
+ }
+ 
++void FunctionBox::setHasPropertyAssignmentName() {
++  functionStencil().setHasPropertyAssignmentName();
++}
++
+ void FunctionBox::copyUpdatedWasEmitted() {
+   ScriptStencil& script = functionStencil();
+   if (wasEmittedByEnclosingScript_) {
 diff --git a/js/src/frontend/SharedContext.h b/js/src/frontend/SharedContext.h
-index 9ccfa82..011ec49 100644
+index 9ccfa82..7b616c1 100644
 --- a/js/src/frontend/SharedContext.h
 +++ b/js/src/frontend/SharedContext.h
-@@ -593,6 +593,13 @@ class FunctionBox : public SuspendableContext {
+@@ -593,6 +593,8 @@ class FunctionBox : public SuspendableContext {
      }
    }
  
-+  void setHasPropertyAssignmentName() {
-+    immutableFlags_.setFlag(ImmutableFlags::HasPropertyAssignmentName);
-+    if (isScriptExtraFieldCopiedToStencil) {
-+      copyUpdatedImmutableFlags();
-+    }
-+  }
++  void setHasPropertyAssignmentName();
 +
    bool needsHomeObject() const {
      return hasFlag(ImmutableFlags::NeedsHomeObject);
    }
+diff --git a/js/src/frontend/Stencil.cpp b/js/src/frontend/Stencil.cpp
+index 2453de9..7ea16da 100644
+--- a/js/src/frontend/Stencil.cpp
++++ b/js/src/frontend/Stencil.cpp
+@@ -1644,6 +1644,9 @@ bool CompilationSyntaxParseCache::copyScriptInfo(
+     data.functionFlags = fun->flags();
+ 
+     BaseScript* lazy = fun->baseScript();
++    if (lazy->hasFlag(MutableScriptFlagsEnum::HasPropertyAssignmentName)) {
++      data.setHasPropertyAssignmentName();
++    }
+     extra.immutableFlags = lazy->immutableFlags();
+     extra.extent = lazy->extent();
+ 
+@@ -1722,6 +1725,9 @@ bool CompilationSyntaxParseCache::copyScriptInfo(
+       data.functionAtom = displayAtom;
+     }
+     data.functionFlags = srcData.functionFlags;
++    if (srcData.hasPropertyAssignmentName()) {
++      data.setHasPropertyAssignmentName();
++    }
+ 
+     extra = inner.scriptExtra();
+   }
+@@ -2502,6 +2508,11 @@ static void UpdateEmittedInnerFunctions(JSContext* cx,
+       continue;
+     }
+ 
++    if (scriptStencil.hasPropertyAssignmentName() && fun->hasBaseScript()) {
++      fun->baseScript()->setFlag(
++          MutableScriptFlagsEnum::HasPropertyAssignmentName);
++    }
++
+     if (scriptStencil.functionFlags.isAsmJSNative() ||
+         fun->baseScript()->hasBytecode()) {
+       // Non-lazy inner functions don't use the enclosingScope_ field.
+@@ -5909,6 +5920,10 @@ static void MergeScriptStencil(ScriptStencil& dest, const ScriptStencil& src,
+     dest.setWasEmittedByEnclosingScript();
+   }
+ 
++  if (src.hasPropertyAssignmentName()) {
++    dest.setHasPropertyAssignmentName();
++  }
++
+   if (src.allowRelazify()) {
+     dest.setAllowRelazify();
+   }
+diff --git a/js/src/frontend/Stencil.h b/js/src/frontend/Stencil.h
+index d81e381..c570f53 100644
+--- a/js/src/frontend/Stencil.h
++++ b/js/src/frontend/Stencil.h
+@@ -1069,6 +1069,9 @@ class ScriptStencil {
+   // TaggedParserAtomIndex.
+   static constexpr uint16_t HasSelfHostedCanonicalName = 1 << 4;
+ 
++  // Set when the enclosing full parse finds a direct property assignment.
++  static constexpr uint16_t HasPropertyAssignmentNameFlag = 1 << 5;
++
+   uint16_t flags_ = 0;
+ 
+   // End of fields.
+@@ -1095,6 +1098,14 @@ class ScriptStencil {
+     flags_ |= WasEmittedByEnclosingScriptFlag;
+   }
+ 
++  bool hasPropertyAssignmentName() const {
++    return flags_ & HasPropertyAssignmentNameFlag;
++  }
++
++  void setHasPropertyAssignmentName() {
++    flags_ |= HasPropertyAssignmentNameFlag;
++  }
++
+   bool allowRelazify() const { return flags_ & AllowRelazifyFlag; }
+ 
+   void setAllowRelazify() { flags_ |= AllowRelazifyFlag; }
 diff --git a/js/src/jsapi-tests/testFunctionProperties.cpp b/js/src/jsapi-tests/testFunctionProperties.cpp
 index 104fbba..1cf4e8f 100644
 --- a/js/src/jsapi-tests/testFunctionProperties.cpp
@@ -81,10 +167,10 @@ index 104fbba..1cf4e8f 100644
        "eval.toString() === 'function eval() {\\n    [native code]\\n}' && "
        "(function(){}).bind(null).toString() === "
 diff --git a/js/src/jsapi-tests/testSavedStacks.cpp b/js/src/jsapi-tests/testSavedStacks.cpp
-index aaa4759..97df658 100644
+index aaa4759..b101ed9 100644
 --- a/js/src/jsapi-tests/testSavedStacks.cpp
 +++ b/js/src/jsapi-tests/testSavedStacks.cpp
-@@ -430,3 +430,57 @@ BEGIN_TEST(test_GetPendingExceptionStack) {
+@@ -430,3 +430,61 @@ BEGIN_TEST(test_GetPendingExceptionStack) {
    return true;
  }
  END_TEST(test_GetPendingExceptionStack)
@@ -106,6 +192,10 @@ index aaa4759..97df658 100644
 +       "    at f (v8_frames.js:1:29)"},
 +      {"var o = {}; o.m = function() { return new Error().stack; };\no.m()",
 +       "    at o.m (v8_frames.js:1:39)"},
++      {"function outer() { var o = {}; o.m = function() { return new Error().stack; }; return o.m(); } outer()",
++       "    at o.m (v8_frames.js:1:58)"},
++      {"var f = (function() { return function() { return new Error().stack; }; })(); f()",
++       "    at v8_frames.js:1:50"},
 +      {"var stack; async function fn() { stack = new Error().stack; } fn(); stack",
 +       "    at fn (v8_frames.js:1:42)"},
 +  };
@@ -160,6 +250,19 @@ index 6121ea5..b4977ed 100644
        size_t offset = !useV8Format && hasGetterOrSetterPrefix(name) ? 4 : 0;
        if (!out.appendSubstring(name, offset, name->length() - offset)) {
          return nullptr;
+diff --git a/js/src/vm/JSScript.h b/js/src/vm/JSScript.h
+index f68a428..5ae955f 100644
+--- a/js/src/vm/JSScript.h
++++ b/js/src/vm/JSScript.h
+@@ -1591,6 +1591,8 @@ class BaseScript : public gc::TenuredCellWithNonGCPointer<uint8_t> {
+   // Mutable flags store transient information used by subsystems such as the
+   // debugger and the JITs. These flags are *not* preserved when serializing or
+   // cloning since they are based on runtime state.
++  // HasPropertyAssignmentName is the exception: it is learned during full
++  // parsing and is preserved separately in ScriptStencil.
+   MutableScriptFlags mutableFlags_ = {};
+ 
+   // Variable-length data owned by this script. This stores one of:
 diff --git a/js/src/vm/SavedFrame.h b/js/src/vm/SavedFrame.h
 index f5b41ef..d777397 100644
 --- a/js/src/vm/SavedFrame.h
@@ -192,7 +295,7 @@ index f5b41ef..d777397 100644
      JSSLOT_PARENT,
      JSSLOT_PRINCIPALS,
 diff --git a/js/src/vm/SavedStacks.cpp b/js/src/vm/SavedStacks.cpp
-index 4ba03fd..e40a836 100644
+index 4ba03fd..852ef7c 100644
 --- a/js/src/vm/SavedStacks.cpp
 +++ b/js/src/vm/SavedStacks.cpp
 @@ -176,12 +176,15 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
@@ -370,7 +473,7 @@ index 4ba03fd..e40a836 100644
 +      v8Name = fun->fullExplicitOrInferredName();
 +      if (fun->hasGuessedAtom() &&
 +          iter.script()->hasFlag(
-+              ImmutableScriptFlagsEnum::HasPropertyAssignmentName)) {
++              MutableScriptFlagsEnum::HasPropertyAssignmentName)) {
 +        // NameFunctions qualifies diagnostics with enclosing scopes separated
 +        // by '/'. Only retain the directly assigned property path.
 +        size_t start = 0;
@@ -406,20 +509,20 @@ index 4ba03fd..e40a836 100644
        }
      }
 diff --git a/js/src/vm/StencilEnums.h b/js/src/vm/StencilEnums.h
-index 3fcd62d..7860fd9 100644
+index 3fcd62d..02bc704 100644
 --- a/js/src/vm/StencilEnums.h
 +++ b/js/src/vm/StencilEnums.h
-@@ -254,6 +254,10 @@ enum class ImmutableScriptFlagsEnum : uint32_t {
-   // Whether this is a self-hosted function that uses the ArgumentsLength or
-   // GetArgument intrinsic.
-   UsesArgumentsIntrinsics = 1 << 30,
-+
-+  // The diagnostic atom came directly from a property assignment, not from
-+  // SpiderMonkey's enclosing-scope or expression-contribution name guesses.
-+  HasPropertyAssignmentName = 1U << 31,
- };
+@@ -273,7 +273,9 @@ enum class MutableScriptFlagsEnum : uint32_t {
+   // Script has an entry in Realm::debugScriptMap.
+   HasDebugScript = 1 << 11,
  
- enum class MutableScriptFlagsEnum : uint32_t {
+-  // (1 << 12) is unused.
++  // Name provenance is discovered when the enclosing script is fully parsed.
++  // Unlike other mutable flags, this is also carried in ScriptStencil.
++  HasPropertyAssignmentName = 1 << 12,
+   // (1 << 13) is unused.
+ 
+   // Script supports relazification where it releases bytecode and gcthings to
 diff --git a/js/src/vm/StructuredClone.cpp b/js/src/vm/StructuredClone.cpp
 index c21b2e0..f05ce70 100644
 --- a/js/src/vm/StructuredClone.cpp

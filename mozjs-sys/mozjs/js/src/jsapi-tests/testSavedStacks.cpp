@@ -448,6 +448,10 @@ BEGIN_TEST(testSavedStacks_V8FrameIdentity) {
        "    at f (v8_frames.js:1:29)"},
       {"var o = {}; o.m = function() { return new Error().stack; };\no.m()",
        "    at o.m (v8_frames.js:1:39)"},
+      {"function outer() { var o = {}; o.m = function() { return new Error().stack; }; return o.m(); } outer()",
+       "    at o.m (v8_frames.js:1:58)"},
+      {"var f = (function() { return function() { return new Error().stack; }; })(); f()",
+       "    at v8_frames.js:1:50"},
       {"var stack; async function fn() { stack = new Error().stack; } fn(); stack",
        "    at fn (v8_frames.js:1:42)"},
   };

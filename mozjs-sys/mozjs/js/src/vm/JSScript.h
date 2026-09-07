@@ -1591,6 +1591,8 @@ class BaseScript : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   // Mutable flags store transient information used by subsystems such as the
   // debugger and the JITs. These flags are *not* preserved when serializing or
   // cloning since they are based on runtime state.
+  // HasPropertyAssignmentName is the exception: it is learned during full
+  // parsing and is preserved separately in ScriptStencil.
   MutableScriptFlags mutableFlags_ = {};
 
   // Variable-length data owned by this script. This stores one of:

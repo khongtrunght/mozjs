@@ -1637,7 +1637,7 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
       v8Name = fun->fullExplicitOrInferredName();
       if (fun->hasGuessedAtom() &&
           iter.script()->hasFlag(
-              ImmutableScriptFlagsEnum::HasPropertyAssignmentName)) {
+              MutableScriptFlagsEnum::HasPropertyAssignmentName)) {
         // NameFunctions qualifies diagnostics with enclosing scopes separated
         // by '/'. Only retain the directly assigned property path.
         size_t start = 0;

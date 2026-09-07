@@ -1069,6 +1069,9 @@ class ScriptStencil {
   // TaggedParserAtomIndex.
   static constexpr uint16_t HasSelfHostedCanonicalName = 1 << 4;
 
+  // Set when the enclosing full parse finds a direct property assignment.
+  static constexpr uint16_t HasPropertyAssignmentNameFlag = 1 << 5;
+
   uint16_t flags_ = 0;
 
   // End of fields.
@@ -1093,6 +1096,14 @@ class ScriptStencil {
 
   void setWasEmittedByEnclosingScript() {
     flags_ |= WasEmittedByEnclosingScriptFlag;
+  }
+
+  bool hasPropertyAssignmentName() const {
+    return flags_ & HasPropertyAssignmentNameFlag;
+  }
+
+  void setHasPropertyAssignmentName() {
+    flags_ |= HasPropertyAssignmentNameFlag;
   }
 
   bool allowRelazify() const { return flags_ & AllowRelazifyFlag; }
