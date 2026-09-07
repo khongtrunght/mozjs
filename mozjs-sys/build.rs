@@ -1035,7 +1035,7 @@ mod archive {
         Some(current)
     }
 
-    /// Compress spidermonkey build into a tarball with necessary static binaries and bindgen wrappers.
+    /// Compress SpiderMonkey's static libraries, Rust bindings, and C++ headers.
     pub(crate) fn compress_static_lib(build_dir: &Path) -> Result<(), std::io::Error> {
         let target = env::var("TARGET").unwrap();
         let target_dir = get_cargo_target_dir(build_dir).unwrap().display();
@@ -1109,6 +1109,16 @@ mod archive {
                 &mut File::open(join_path(build_dir, "gluebindings.rs"))?,
             )?;
         }
+
+        // dist/include contains links into the source checkout. Store the header
+        // contents so the archive is usable without the CI runner's filesystem.
+        tar.follow_symlinks(true);
+        tar.append_dir_all("dist/include", build_dir.join("dist/include"))?;
+        tar.append_file(
+            "js/src/js-confdefs.h",
+            &mut File::open(build_dir.join("js/src/js-confdefs.h"))?,
+        )?;
+        tar.into_inner()?.finish()?;
 
         Ok(())
     }
