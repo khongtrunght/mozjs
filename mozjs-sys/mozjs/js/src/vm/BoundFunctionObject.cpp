@@ -123,6 +123,13 @@ JSString* BoundFunctionObject::funToString(JSContext* cx, Handle<JSObject*> obj,
     return NewStringCopy<CanGC>(cx, nativeCodeBound);
   }
 
+  if (cx->runtime()->nativeFunctionSourceFormat() ==
+      JS::NativeFunctionSourceFormat::V8) {
+    static constexpr std::string_view nativeCodeV8 =
+        "function () { [native code] }";
+    return NewStringCopy<CanGC>(cx, nativeCodeV8);
+  }
+
   static constexpr std::string_view nativeCode =
       "function() {\n    [native code]\n}";
   return NewStringCopy<CanGC>(cx, nativeCode);

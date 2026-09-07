@@ -34,6 +34,7 @@
 #include "js/ScalarType.h"
 #include "js/SharedArrayBuffer.h"
 #include "js/SourceText.h"
+#include "js/Stack.h"
 #include "js/String.h"
 #include "js/StructuredClone.h"
 #include "js/Symbol.h"

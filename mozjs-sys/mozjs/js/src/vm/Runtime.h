@@ -1026,6 +1026,8 @@ struct JSRuntime {
   /* The stack format for the current runtime.  Only valid on non-child
    * runtimes. */
   mozilla::Atomic<js::StackFormat, mozilla::ReleaseAcquire> stackFormat_;
+  mozilla::Atomic<JS::NativeFunctionSourceFormat, mozilla::ReleaseAcquire>
+      nativeFunctionSourceFormat_{JS::NativeFunctionSourceFormat::SpiderMonkey};
 
  public:
   js::StackFormat stackFormat() const {
@@ -1041,6 +1043,18 @@ struct JSRuntime {
     MOZ_ASSERT(!parentRuntime);
     MOZ_ASSERT(format != js::StackFormat::Default);
     stackFormat_ = format;
+  }
+
+  JS::NativeFunctionSourceFormat nativeFunctionSourceFormat() const {
+    const JSRuntime* rt = this;
+    while (rt->parentRuntime) {
+      rt = rt->parentRuntime;
+    }
+    return rt->nativeFunctionSourceFormat_;
+  }
+  void setNativeFunctionSourceFormat(JS::NativeFunctionSourceFormat format) {
+    MOZ_ASSERT(!parentRuntime);
+    nativeFunctionSourceFormat_ = format;
   }
 
  private:

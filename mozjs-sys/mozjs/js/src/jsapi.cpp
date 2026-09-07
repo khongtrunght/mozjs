@@ -5146,6 +5146,16 @@ JS_PUBLIC_API js::StackFormat js::GetStackFormat(JSContext* cx) {
   return cx->runtime()->stackFormat();
 }
 
+JS_PUBLIC_API void JS::SetNativeFunctionSourceFormat(
+    JSContext* cx, JS::NativeFunctionSourceFormat format) {
+  cx->runtime()->setNativeFunctionSourceFormat(format);
+}
+
+JS_PUBLIC_API JS::NativeFunctionSourceFormat JS::GetNativeFunctionSourceFormat(
+    JSContext* cx) {
+  return cx->runtime()->nativeFunctionSourceFormat();
+}
+
 JS_PUBLIC_API void JS::SetMeasuringExecutionTimeEnabled(JSContext* cx,
                                                         bool value) {
   cx->setMeasuringExecutionTimeEnabled(value);

@@ -1,0 +1,214 @@
+diff --git a/js/public/Stack.h b/js/public/Stack.h
+index 5442b14..81f3246 100644
+--- a/js/public/Stack.h
++++ b/js/public/Stack.h
+@@ -61,6 +61,23 @@ extern JS_PUBLIC_API StackFormat GetStackFormat(JSContext* cx);
+ 
+ namespace JS {
+ 
++enum class NativeFunctionSourceFormat { SpiderMonkey, V8 };
++
++/**
++ * Select the Function.prototype.toString representation for functions without
++ * source text. SpiderMonkey (the default) uses a multi-line native-code body;
++ * V8 uses a single-line body and preserves native accessor name prefixes.
++ * Real source text and the non-standard toSource extension are unchanged.
++ * Like SetStackFormat, this setting belongs to the root runtime and is
++ * inherited by child runtimes. The setter must be called on the root runtime's
++ * context.
++ */
++extern JS_PUBLIC_API void SetNativeFunctionSourceFormat(
++    JSContext* cx, NativeFunctionSourceFormat format);
++
++extern JS_PUBLIC_API NativeFunctionSourceFormat
++GetNativeFunctionSourceFormat(JSContext* cx);
++
+ /**
+  * Capture all frames.
+  */
+diff --git a/js/src/jsapi-tests/testFunctionProperties.cpp b/js/src/jsapi-tests/testFunctionProperties.cpp
+index 37ef689..104fbba 100644
+--- a/js/src/jsapi-tests/testFunctionProperties.cpp
++++ b/js/src/jsapi-tests/testFunctionProperties.cpp
+@@ -3,6 +3,7 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "js/PropertyAndElement.h"  // JS_GetProperty
++#include "js/Stack.h"
+ #include "jsapi-tests/tests.h"
+ 
+ BEGIN_TEST(testFunctionProperties) {
+@@ -21,3 +22,49 @@ BEGIN_TEST(testFunctionProperties) {
+   return true;
+ }
+ END_TEST(testFunctionProperties)
++
++BEGIN_TEST(testNativeFunctionSourceFormat) {
++  JS::RootedValue result(cx);
++  EVAL(
++      "eval.toString() === 'function eval() {\\n    [native code]\\n}' && "
++      "(function(){}).bind(null).toString() === "
++      "'function() {\\n    [native code]\\n}' && "
++      "Object.getOwnPropertyDescriptor(Map.prototype, 'size').get.toString() "
++      "=== 'function size() {\\n    [native code]\\n}'",
++      &result);
++  CHECK(result.toBoolean());
++
++  EXEC(
++      "var originalNativeSource = eval.toSource();"
++      "var originalBoundSource = (function(){}).bind(null).toSource();");
++  JS::SetNativeFunctionSourceFormat(cx, JS::NativeFunctionSourceFormat::V8);
++  EVAL(
++      "eval.toString() === 'function eval() { [native code] }' && "
++      "(function(){}).bind(null).toString() === "
++      "'function () { [native code] }' && "
++      "Object.getOwnPropertyDescriptor(Map.prototype, 'size').get.toString() "
++      "=== 'function get size() { [native code] }' && "
++      "eval.toSource() === originalNativeSource && "
++      "(function(){}).bind(null).toSource() === originalBoundSource && "
++      "(function real(a) { return a; }).toString() === "
++      "'function real(a) { return a; }'",
++      &result);
++  CHECK(result.toBoolean());
++
++  JS::SetNativeFunctionSourceFormat(
++      cx, JS::NativeFunctionSourceFormat::SpiderMonkey);
++  EVAL("eval.toString() === 'function eval() {\\n    [native code]\\n}'",
++       &result);
++  CHECK(result.toBoolean());
++  return true;
++}
++
++JSObject* createGlobal(JSPrincipals* principals = nullptr) override {
++  JS::RealmOptions options;
++  options.creationOptions().setToSourceEnabled(true);
++  global = JS_NewGlobalObject(cx, getGlobalClass(), principals,
++                              JS::FireOnNewGlobalHook, options);
++  return global;
++}
++
++END_TEST(testNativeFunctionSourceFormat)
+diff --git a/js/src/jsapi.cpp b/js/src/jsapi.cpp
+index 5fafa67..c983081 100644
+--- a/js/src/jsapi.cpp
++++ b/js/src/jsapi.cpp
+@@ -5146,6 +5146,16 @@ JS_PUBLIC_API js::StackFormat js::GetStackFormat(JSContext* cx) {
+   return cx->runtime()->stackFormat();
+ }
+ 
++JS_PUBLIC_API void JS::SetNativeFunctionSourceFormat(
++    JSContext* cx, JS::NativeFunctionSourceFormat format) {
++  cx->runtime()->setNativeFunctionSourceFormat(format);
++}
++
++JS_PUBLIC_API JS::NativeFunctionSourceFormat JS::GetNativeFunctionSourceFormat(
++    JSContext* cx) {
++  return cx->runtime()->nativeFunctionSourceFormat();
++}
++
+ JS_PUBLIC_API void JS::SetMeasuringExecutionTimeEnabled(JSContext* cx,
+                                                         bool value) {
+   cx->setMeasuringExecutionTimeEnabled(value);
+diff --git a/js/src/proxy/BaseProxyHandler.cpp b/js/src/proxy/BaseProxyHandler.cpp
+index 557e467..be72cae 100644
+--- a/js/src/proxy/BaseProxyHandler.cpp
++++ b/js/src/proxy/BaseProxyHandler.cpp
+@@ -311,6 +311,10 @@ const char* BaseProxyHandler::className(JSContext* cx,
+ JSString* BaseProxyHandler::fun_toString(JSContext* cx, HandleObject proxy,
+                                          bool isToSource) const {
+   if (proxy->isCallable()) {
++    if (!isToSource && cx->runtime()->nativeFunctionSourceFormat() ==
++                           JS::NativeFunctionSourceFormat::V8) {
++      return JS_NewStringCopyZ(cx, "function () { [native code] }");
++    }
+     return JS_NewStringCopyZ(cx, "function () {\n    [native code]\n}");
+   }
+ 
+diff --git a/js/src/vm/BoundFunctionObject.cpp b/js/src/vm/BoundFunctionObject.cpp
+index b7f46fa..5d8a222 100644
+--- a/js/src/vm/BoundFunctionObject.cpp
++++ b/js/src/vm/BoundFunctionObject.cpp
+@@ -123,6 +123,13 @@ JSString* BoundFunctionObject::funToString(JSContext* cx, Handle<JSObject*> obj,
+     return NewStringCopy<CanGC>(cx, nativeCodeBound);
+   }
+ 
++  if (cx->runtime()->nativeFunctionSourceFormat() ==
++      JS::NativeFunctionSourceFormat::V8) {
++    static constexpr std::string_view nativeCodeV8 =
++        "function () { [native code] }";
++    return NewStringCopy<CanGC>(cx, nativeCodeV8);
++  }
++
+   static constexpr std::string_view nativeCode =
+       "function() {\n    [native code]\n}";
+   return NewStringCopy<CanGC>(cx, nativeCode);
+diff --git a/js/src/vm/JSFunction.cpp b/js/src/vm/JSFunction.cpp
+index 7d264f0..6121ea5 100644
+--- a/js/src/vm/JSFunction.cpp
++++ b/js/src/vm/JSFunction.cpp
+@@ -919,6 +919,9 @@ JSString* js::FunctionToString(JSContext* cx, HandleFunction fun,
+     // string that would be matched by IdentifierName must be the initial
+     // value of the name property of |fun|.
+ 
++    bool useV8Format = cx->runtime()->nativeFunctionSourceFormat() ==
++                       JS::NativeFunctionSourceFormat::V8;
++
+     auto hasGetterOrSetterPrefix = [](JSAtom* name) {
+       auto hasGetterOrSetterPrefix = [](const auto* chars) {
+         return (chars[0] == 'g' || chars[0] == 's') && chars[1] == 'e' &&
+@@ -949,17 +952,18 @@ JSString* js::FunctionToString(JSContext* cx, HandleFunction fun,
+         return nullptr;
+       }
+ 
+-      // Built-in getters or setters are classified as one of
+-      // NormalFunction, Getter, or Setter. Strip any leading "get " or "set "
+-      // if present.
++      // V8 preserves native accessor prefixes; SpiderMonkey strips them.
+       JSAtom* name = fun->maybePartialExplicitName();
+-      size_t offset = hasGetterOrSetterPrefix(name) ? 4 : 0;
++      size_t offset = !useV8Format && hasGetterOrSetterPrefix(name) ? 4 : 0;
+       if (!out.appendSubstring(name, offset, name->length() - offset)) {
+         return nullptr;
+       }
++    } else if (useV8Format && !out.append(' ')) {
++      return nullptr;
+     }
+ 
+-    if (!out.append("() {\n    [native code]\n}")) {
++    if (!(useV8Format ? out.append("() { [native code] }")
++                      : out.append("() {\n    [native code]\n}"))) {
+       return nullptr;
+     }
+   } else {
+diff --git a/js/src/vm/Runtime.h b/js/src/vm/Runtime.h
+index 19914ff..a3de177 100644
+--- a/js/src/vm/Runtime.h
++++ b/js/src/vm/Runtime.h
+@@ -1026,6 +1026,8 @@ struct JSRuntime {
+   /* The stack format for the current runtime.  Only valid on non-child
+    * runtimes. */
+   mozilla::Atomic<js::StackFormat, mozilla::ReleaseAcquire> stackFormat_;
++  mozilla::Atomic<JS::NativeFunctionSourceFormat, mozilla::ReleaseAcquire>
++      nativeFunctionSourceFormat_{JS::NativeFunctionSourceFormat::SpiderMonkey};
+ 
+  public:
+   js::StackFormat stackFormat() const {
+@@ -1043,6 +1045,18 @@ struct JSRuntime {
+     stackFormat_ = format;
+   }
+ 
++  JS::NativeFunctionSourceFormat nativeFunctionSourceFormat() const {
++    const JSRuntime* rt = this;
++    while (rt->parentRuntime) {
++      rt = rt->parentRuntime;
++    }
++    return rt->nativeFunctionSourceFormat_;
++  }
++  void setNativeFunctionSourceFormat(JS::NativeFunctionSourceFormat format) {
++    MOZ_ASSERT(!parentRuntime);
++    nativeFunctionSourceFormat_ = format;
++  }
++
+  private:
+   // Warning: no data should be accessed in these caches from another thread,
+   // but Ion needs to be able to access addresses inside here, which should be

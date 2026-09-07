@@ -166,6 +166,8 @@ wrap!(jsapi: pub fn IterateRealmsWithPrincipals(cx: &JSContext, principals: *mut
 wrap!(jsapi: pub fn IterateRealmsInCompartment(cx: &JSContext, compartment: *mut Compartment, data: *mut ::std::os::raw::c_void, realmCallback: IterateRealmCallback));
 wrap!(jsapi: pub fn RealmCreationOptionsRef1(cx: &JSContext) -> *const RealmCreationOptions);
 wrap!(jsapi: pub fn RealmBehaviorsRef1(cx: &JSContext) -> *const RealmBehaviors);
+wrap!(jsapi: pub fn SetNativeFunctionSourceFormat(cx: &JSContext, format: NativeFunctionSourceFormat));
+wrap!(jsapi: pub fn GetNativeFunctionSourceFormat(cx: &JSContext) -> NativeFunctionSourceFormat);
 wrap!(jsapi: pub fn CaptureCurrentStack(cx: &mut JSContext, stackp: MutableHandleObject, capture: *mut StackCapture, startAfter: HandleObject) -> bool);
 wrap!(jsapi: pub fn IsAsyncStackCaptureEnabledForRealm(cx: &JSContext) -> bool);
 wrap!(jsapi: pub fn BuildStackString(cx: &mut JSContext, principals: *mut JSPrincipals, stack: HandleObject, stringp: MutableHandleString, indent: usize, stackFormat: StackFormat) -> bool);

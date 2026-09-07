@@ -919,6 +919,9 @@ JSString* js::FunctionToString(JSContext* cx, HandleFunction fun,
     // string that would be matched by IdentifierName must be the initial
     // value of the name property of |fun|.
 
+    bool useV8Format = cx->runtime()->nativeFunctionSourceFormat() ==
+                       JS::NativeFunctionSourceFormat::V8;
+
     auto hasGetterOrSetterPrefix = [](JSAtom* name) {
       auto hasGetterOrSetterPrefix = [](const auto* chars) {
         return (chars[0] == 'g' || chars[0] == 's') && chars[1] == 'e' &&
@@ -949,17 +952,18 @@ JSString* js::FunctionToString(JSContext* cx, HandleFunction fun,
         return nullptr;
       }
 
-      // Built-in getters or setters are classified as one of
-      // NormalFunction, Getter, or Setter. Strip any leading "get " or "set "
-      // if present.
+      // V8 preserves native accessor prefixes; SpiderMonkey strips them.
       JSAtom* name = fun->maybePartialExplicitName();
-      size_t offset = hasGetterOrSetterPrefix(name) ? 4 : 0;
+      size_t offset = !useV8Format && hasGetterOrSetterPrefix(name) ? 4 : 0;
       if (!out.appendSubstring(name, offset, name->length() - offset)) {
         return nullptr;
       }
+    } else if (useV8Format && !out.append(' ')) {
+      return nullptr;
     }
 
-    if (!out.append("() {\n    [native code]\n}")) {
+    if (!(useV8Format ? out.append("() { [native code] }")
+                      : out.append("() {\n    [native code]\n}"))) {
       return nullptr;
     }
   } else {

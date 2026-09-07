@@ -61,6 +61,23 @@ extern JS_PUBLIC_API StackFormat GetStackFormat(JSContext* cx);
 
 namespace JS {
 
+enum class NativeFunctionSourceFormat { SpiderMonkey, V8 };
+
+/**
+ * Select the Function.prototype.toString representation for functions without
+ * source text. SpiderMonkey (the default) uses a multi-line native-code body;
+ * V8 uses a single-line body and preserves native accessor name prefixes.
+ * Real source text and the non-standard toSource extension are unchanged.
+ * Like SetStackFormat, this setting belongs to the root runtime and is
+ * inherited by child runtimes. The setter must be called on the root runtime's
+ * context.
+ */
+extern JS_PUBLIC_API void SetNativeFunctionSourceFormat(
+    JSContext* cx, NativeFunctionSourceFormat format);
+
+extern JS_PUBLIC_API NativeFunctionSourceFormat
+GetNativeFunctionSourceFormat(JSContext* cx);
+
 /**
  * Capture all frames.
  */

@@ -311,6 +311,10 @@ const char* BaseProxyHandler::className(JSContext* cx,
 JSString* BaseProxyHandler::fun_toString(JSContext* cx, HandleObject proxy,
                                          bool isToSource) const {
   if (proxy->isCallable()) {
+    if (!isToSource && cx->runtime()->nativeFunctionSourceFormat() ==
+                           JS::NativeFunctionSourceFormat::V8) {
+      return JS_NewStringCopyZ(cx, "function () { [native code] }");
+    }
     return JS_NewStringCopyZ(cx, "function () {\n    [native code]\n}");
   }
 
