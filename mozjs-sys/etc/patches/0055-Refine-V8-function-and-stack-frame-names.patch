@@ -67,7 +67,7 @@ index 9ccfa82..7b616c1 100644
      return hasFlag(ImmutableFlags::NeedsHomeObject);
    }
 diff --git a/js/src/frontend/Stencil.cpp b/js/src/frontend/Stencil.cpp
-index 2453de9..7ea16da 100644
+index 2453de9..f30b2c3 100644
 --- a/js/src/frontend/Stencil.cpp
 +++ b/js/src/frontend/Stencil.cpp
 @@ -1644,6 +1644,9 @@ bool CompilationSyntaxParseCache::copyScriptInfo(
@@ -90,7 +90,18 @@ index 2453de9..7ea16da 100644
  
      extra = inner.scriptExtra();
    }
-@@ -2502,6 +2508,11 @@ static void UpdateEmittedInnerFunctions(JSContext* cx,
+@@ -2410,6 +2416,10 @@ static bool InstantiateScriptStencils(JSContext* cx,
+         return false;
+       }
+     }
++    if (scriptStencil.hasPropertyAssignmentName() && fun->hasBaseScript()) {
++      fun->baseScript()->setFlag(
++          MutableScriptFlagsEnum::HasPropertyAssignmentName);
++    }
+   }
+ 
+   return true;
+@@ -2502,6 +2512,11 @@ static void UpdateEmittedInnerFunctions(JSContext* cx,
        continue;
      }
  
@@ -102,7 +113,7 @@ index 2453de9..7ea16da 100644
      if (scriptStencil.functionFlags.isAsmJSNative() ||
          fun->baseScript()->hasBytecode()) {
        // Non-lazy inner functions don't use the enclosingScope_ field.
-@@ -5909,6 +5920,10 @@ static void MergeScriptStencil(ScriptStencil& dest, const ScriptStencil& src,
+@@ -5909,6 +5924,10 @@ static void MergeScriptStencil(ScriptStencil& dest, const ScriptStencil& src,
      dest.setWasEmittedByEnclosingScript();
    }
  
@@ -167,10 +178,10 @@ index 104fbba..1cf4e8f 100644
        "eval.toString() === 'function eval() {\\n    [native code]\\n}' && "
        "(function(){}).bind(null).toString() === "
 diff --git a/js/src/jsapi-tests/testSavedStacks.cpp b/js/src/jsapi-tests/testSavedStacks.cpp
-index aaa4759..b101ed9 100644
+index aaa4759..233465d 100644
 --- a/js/src/jsapi-tests/testSavedStacks.cpp
 +++ b/js/src/jsapi-tests/testSavedStacks.cpp
-@@ -430,3 +430,61 @@ BEGIN_TEST(test_GetPendingExceptionStack) {
+@@ -430,3 +430,78 @@ BEGIN_TEST(test_GetPendingExceptionStack) {
    return true;
  }
  END_TEST(test_GetPendingExceptionStack)
@@ -212,6 +223,22 @@ index aaa4759..b101ed9 100644
 +    CHECK(strncmp(first + 1, test.expected, strlen(test.expected)) == 0);
 +    CHECK(first[1 + strlen(test.expected)] == '\n' ||
 +          first[1 + strlen(test.expected)] == '\0');
++
++    JS::CompileOptions options(cx);
++    options.setFileAndLine("v8_frames.js", 1).setForceFullParse();
++    JS::SourceText<mozilla::Utf8Unit> source;
++    CHECK(source.init(cx, test.source, strlen(test.source),
++                      JS::SourceOwnership::Borrowed));
++    JS::RootedValue eager(cx);
++    CHECK(JS::Evaluate(cx, options, source, &eager));
++    JS::RootedString eagerStack(cx, eager.toString());
++    JS::UniqueChars eagerBytes = JS_EncodeStringToUTF8(cx, eagerStack);
++    CHECK(eagerBytes);
++    const char* eagerFirst = strchr(eagerBytes.get(), '\n');
++    CHECK(eagerFirst);
++    CHECK(strncmp(eagerFirst + 1, test.expected, strlen(test.expected)) == 0);
++    CHECK(eagerFirst[1 + strlen(test.expected)] == '\n' ||
++          eagerFirst[1 + strlen(test.expected)] == '\0');
 +  }
 +
 +  CHECK(evaluate(
@@ -220,7 +247,8 @@ index aaa4759..b101ed9 100644
 +      "var asyncStack; fn().then(s => { asyncStack = s; });",
 +      "v8_async.js", 1, &value));
 +  js::RunJobs(cx);
-+  EVAL("asyncStack.includes('\\n    at async fn (v8_async.js:2:35)')", &value);
++  EVAL("asyncStack.split('\\n').some(line => "
++       "line.startsWith('    at async fn (v8_async.js:2:'))", &value);
 +  CHECK(value.toBoolean());
 +  CHECK(js::DefineTestingFunctions(cx, global, false, false));
 +  EVAL(

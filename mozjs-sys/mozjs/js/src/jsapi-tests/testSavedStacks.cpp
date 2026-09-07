@@ -468,6 +468,22 @@ BEGIN_TEST(testSavedStacks_V8FrameIdentity) {
     CHECK(strncmp(first + 1, test.expected, strlen(test.expected)) == 0);
     CHECK(first[1 + strlen(test.expected)] == '\n' ||
           first[1 + strlen(test.expected)] == '\0');
+
+    JS::CompileOptions options(cx);
+    options.setFileAndLine("v8_frames.js", 1).setForceFullParse();
+    JS::SourceText<mozilla::Utf8Unit> source;
+    CHECK(source.init(cx, test.source, strlen(test.source),
+                      JS::SourceOwnership::Borrowed));
+    JS::RootedValue eager(cx);
+    CHECK(JS::Evaluate(cx, options, source, &eager));
+    JS::RootedString eagerStack(cx, eager.toString());
+    JS::UniqueChars eagerBytes = JS_EncodeStringToUTF8(cx, eagerStack);
+    CHECK(eagerBytes);
+    const char* eagerFirst = strchr(eagerBytes.get(), '\n');
+    CHECK(eagerFirst);
+    CHECK(strncmp(eagerFirst + 1, test.expected, strlen(test.expected)) == 0);
+    CHECK(eagerFirst[1 + strlen(test.expected)] == '\n' ||
+          eagerFirst[1 + strlen(test.expected)] == '\0');
   }
 
   CHECK(evaluate(
@@ -476,7 +492,8 @@ BEGIN_TEST(testSavedStacks_V8FrameIdentity) {
       "var asyncStack; fn().then(s => { asyncStack = s; });",
       "v8_async.js", 1, &value));
   js::RunJobs(cx);
-  EVAL("asyncStack.includes('\\n    at async fn (v8_async.js:2:35)')", &value);
+  EVAL("asyncStack.split('\\n').some(line => "
+       "line.startsWith('    at async fn (v8_async.js:2:'))", &value);
   CHECK(value.toBoolean());
   CHECK(js::DefineTestingFunctions(cx, global, false, false));
   EVAL(

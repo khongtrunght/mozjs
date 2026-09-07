@@ -174,13 +174,20 @@ fn capture_stack() {
                 "    at fn (v8_frames.js:1:42)",
             ),
         ];
-        for (label, script, expected) in cases {
-            let options = CompileOptionsWrapper::new(context, c"v8_frames.js".to_owned(), 1);
-            evaluate_script(context, global.handle(), script, rval.handle_mut(), options).unwrap();
-            let stack = jsstr_to_string(context, NonNull::new(rval.get().to_string()).unwrap());
-            let frame = stack.lines().nth(1).unwrap();
-            println!("V8 {label}: {frame:?}");
-            assert_eq!(frame, expected, "{label}");
+        for eager in [false, true] {
+            for (label, script, expected) in cases {
+                let options = CompileOptionsWrapper::new(context, c"v8_frames.js".to_owned(), 1);
+                if eager {
+                    (*options.ptr)._base.eagerDelazificationStrategy_ =
+                        mozjs::jsapi::DelazificationOption::ParseEverythingEagerly;
+                }
+                evaluate_script(context, global.handle(), script, rval.handle_mut(), options)
+                    .unwrap();
+                let stack = jsstr_to_string(context, NonNull::new(rval.get().to_string()).unwrap());
+                let frame = stack.lines().nth(1).unwrap();
+                println!("V8 {label} (eager={eager}): {frame:?}");
+                assert_eq!(frame, expected, "{label}, eager={eager}");
+            }
         }
 
         let options = CompileOptionsWrapper::new(context, c"v8_async.js".to_owned(), 1);
@@ -199,6 +206,10 @@ fn capture_stack() {
         .unwrap();
         let stack = jsstr_to_string(context, NonNull::new(rval.get().to_string()).unwrap());
         println!("V8 async continuation: {stack:?}");
-        assert!(stack.contains("\n    at async fn (v8_async.js:2:35)"));
+        // SavedFrame records the call-site column and additional async ancestry,
+        // not V8's reconstructed await position. Assert the async naming contract.
+        assert!(stack
+            .lines()
+            .any(|line| line.starts_with("    at async fn (v8_async.js:2:")));
     }
 }

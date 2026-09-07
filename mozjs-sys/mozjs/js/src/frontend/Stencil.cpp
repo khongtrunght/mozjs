@@ -2416,6 +2416,10 @@ static bool InstantiateScriptStencils(JSContext* cx,
         return false;
       }
     }
+    if (scriptStencil.hasPropertyAssignmentName() && fun->hasBaseScript()) {
+      fun->baseScript()->setFlag(
+          MutableScriptFlagsEnum::HasPropertyAssignmentName);
+    }
   }
 
   return true;
