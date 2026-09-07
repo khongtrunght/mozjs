@@ -1,0 +1,83 @@
+diff --git a/js/public/RealmOptions.h b/js/public/RealmOptions.h
+index dffea35..2e9a14e 100644
+--- a/js/public/RealmOptions.h
++++ b/js/public/RealmOptions.h
+@@ -307,6 +307,8 @@ class JS_PUBLIC_API RealmBehaviors {
+   // default time zone. The time zone must be a valid IANA time zone identifier,
+   // otherwise this option will be ignored and the system default time zone will
+   // be used!
++  // Default Intl formatters preserve the override's identifier spelling,
++  // including IANA aliases. Explicit Intl timeZone options still canonicalize.
+   //
+   // https://w3c.github.io/webdriver-bidi/#command-emulation-setTimezoneOverride
+   RefPtr<TimeZoneString> timeZoneOverride() const { return timeZoneOverride_; }
+diff --git a/js/src/builtin/intl/GlobalIntlData.cpp b/js/src/builtin/intl/GlobalIntlData.cpp
+index 46df4bd..71df286 100644
+--- a/js/src/builtin/intl/GlobalIntlData.cpp
++++ b/js/src/builtin/intl/GlobalIntlData.cpp
+@@ -115,6 +115,14 @@ JSLinearString* js::intl::GlobalIntlData::defaultTimeZone(JSContext* cx) {
+     return nullptr;
+   }
+ 
++  // Embedders select the spelling of a realm override, including IANA aliases.
++  // Reuse the raw identifier already cached by ensureRealmTimeZone. Do not put
++  // it in defaultTimeZone_: removing an override must restore canonicalization
++  // even when the system time zone happens to use the same identifier.
++  if (cx->realm()->behaviors().timeZoneOverride()) {
++    return realmTimeZone_;
++  }
++
+   // If we didn't have a cache hit, compute the default time zone.
+   if (!defaultTimeZone_) {
+     // Cache the computed time zone until the realm time zone changes.
+diff --git a/js/src/jsapi-tests/testDateToLocaleString.cpp b/js/src/jsapi-tests/testDateToLocaleString.cpp
+index e1f1887..dd449b7 100644
+--- a/js/src/jsapi-tests/testDateToLocaleString.cpp
++++ b/js/src/jsapi-tests/testDateToLocaleString.cpp
+@@ -3,6 +3,8 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "js/LocaleSensitive.h"
++#include "js/Realm.h"
++#include "js/RealmOptions.h"
+ #include "jsapi-tests/tests.h"
+ 
+ BEGIN_TEST(testDateToLocaleString) {
+@@ -58,3 +60,37 @@ BEGIN_TEST(testDateToLocaleString) {
+   return true;
+ }
+ END_TEST(testDateToLocaleString)
++
++BEGIN_TEST(testIntlRealmTimeZoneOverride) {
++  JS::RootedValue result(cx);
++  EVAL("typeof Intl !== 'undefined'", &result);
++  if (!result.toBoolean()) {
++    return true;
++  }
++
++  EXEC(
++      "var systemZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;");
++  auto* realm = JS::GetCurrentRealmOrNull(cx);
++  JS::SetRealmTimezoneOverride(realm, "Asia/Saigon");
++  EVAL(
++      "new Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Saigon' "
++      "&& new Date('2025-01-01T00:00:00Z').getTimezoneOffset() === -420 "
++      "&& new Intl.DateTimeFormat('en', {timeZone: 'Asia/Saigon'})"
++      ".resolvedOptions().timeZone === 'Asia/Ho_Chi_Minh'",
++      &result);
++  CHECK(result.toBoolean());
++
++  JS::SetRealmTimezoneOverride(realm, "Etc/UTC");
++  EVAL(
++      "new Intl.DateTimeFormat().resolvedOptions().timeZone === 'Etc/UTC' "
++      "&& new Date('2025-01-01T00:00:00Z').getTimezoneOffset() === 0",
++      &result);
++  CHECK(result.toBoolean());
++
++  JS::SetRealmTimezoneOverride(realm, nullptr);
++  EVAL("new Intl.DateTimeFormat().resolvedOptions().timeZone === systemZone",
++       &result);
++  CHECK(result.toBoolean());
++  return true;
++}
++END_TEST(testIntlRealmTimeZoneOverride)

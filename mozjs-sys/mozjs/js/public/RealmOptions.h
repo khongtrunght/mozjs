@@ -307,6 +307,8 @@ class JS_PUBLIC_API RealmBehaviors {
   // default time zone. The time zone must be a valid IANA time zone identifier,
   // otherwise this option will be ignored and the system default time zone will
   // be used!
+  // Default Intl formatters preserve the override's identifier spelling,
+  // including IANA aliases. Explicit Intl timeZone options still canonicalize.
   //
   // https://w3c.github.io/webdriver-bidi/#command-emulation-setTimezoneOverride
   RefPtr<TimeZoneString> timeZoneOverride() const { return timeZoneOverride_; }

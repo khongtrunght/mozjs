@@ -3,6 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "js/LocaleSensitive.h"
+#include "js/Realm.h"
+#include "js/RealmOptions.h"
 #include "jsapi-tests/tests.h"
 
 BEGIN_TEST(testDateToLocaleString) {
@@ -58,3 +60,37 @@ BEGIN_TEST(testDateToLocaleString) {
   return true;
 }
 END_TEST(testDateToLocaleString)
+
+BEGIN_TEST(testIntlRealmTimeZoneOverride) {
+  JS::RootedValue result(cx);
+  EVAL("typeof Intl !== 'undefined'", &result);
+  if (!result.toBoolean()) {
+    return true;
+  }
+
+  EXEC(
+      "var systemZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;");
+  auto* realm = JS::GetCurrentRealmOrNull(cx);
+  JS::SetRealmTimezoneOverride(realm, "Asia/Saigon");
+  EVAL(
+      "new Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Saigon' "
+      "&& new Date('2025-01-01T00:00:00Z').getTimezoneOffset() === -420 "
+      "&& new Intl.DateTimeFormat('en', {timeZone: 'Asia/Saigon'})"
+      ".resolvedOptions().timeZone === 'Asia/Ho_Chi_Minh'",
+      &result);
+  CHECK(result.toBoolean());
+
+  JS::SetRealmTimezoneOverride(realm, "Etc/UTC");
+  EVAL(
+      "new Intl.DateTimeFormat().resolvedOptions().timeZone === 'Etc/UTC' "
+      "&& new Date('2025-01-01T00:00:00Z').getTimezoneOffset() === 0",
+      &result);
+  CHECK(result.toBoolean());
+
+  JS::SetRealmTimezoneOverride(realm, nullptr);
+  EVAL("new Intl.DateTimeFormat().resolvedOptions().timeZone === systemZone",
+       &result);
+  CHECK(result.toBoolean());
+  return true;
+}
+END_TEST(testIntlRealmTimeZoneOverride)

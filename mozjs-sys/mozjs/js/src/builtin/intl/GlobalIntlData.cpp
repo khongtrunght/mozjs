@@ -115,6 +115,14 @@ JSLinearString* js::intl::GlobalIntlData::defaultTimeZone(JSContext* cx) {
     return nullptr;
   }
 
+  // Embedders select the spelling of a realm override, including IANA aliases.
+  // Reuse the raw identifier already cached by ensureRealmTimeZone. Do not put
+  // it in defaultTimeZone_: removing an override must restore canonicalization
+  // even when the system time zone happens to use the same identifier.
+  if (cx->realm()->behaviors().timeZoneOverride()) {
+    return realmTimeZone_;
+  }
+
   // If we didn't have a cache hit, compute the default time zone.
   if (!defaultTimeZone_) {
     // Cache the computed time zone until the realm time zone changes.
