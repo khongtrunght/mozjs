@@ -1217,7 +1217,9 @@ static bool V8DeriveMethodNameCandidate(JSContext* cx, Handle<JSAtom*> v8Name,
   if (candidateLength == 0) {
     return true;
   }
-  JSString* str = NewDependentString(cx, v8Name, start, candidateLength);
+  // AtomizeString allocates and can GC; the dependent string must stay
+  // rooted across it.
+  RootedString str(cx, NewDependentString(cx, v8Name, start, candidateLength));
   if (!str) {
     return false;
   }
