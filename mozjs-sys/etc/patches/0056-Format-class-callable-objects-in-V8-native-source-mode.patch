@@ -1,22 +1,24 @@
 diff --git a/js/public/Stack.h b/js/public/Stack.h
-index 14ff26c..2ab1e23 100644
+index 14ff26c..71908c5 100644
 --- a/js/public/Stack.h
 +++ b/js/public/Stack.h
-@@ -74,6 +74,9 @@ enum class NativeFunctionSourceFormat { SpiderMonkey, V8 };
+@@ -74,6 +74,11 @@ enum class NativeFunctionSourceFormat { SpiderMonkey, V8 };
   * Select the Function.prototype.toString representation for functions without
   * source text. SpiderMonkey (the default) uses a multi-line native-code body;
   * V8 uses a single-line body and preserves native accessor name prefixes.
-+ * In V8 mode, non-proxy class-callable objects use the JSClass name instead of
-+ * their ObjectOps::funToString hook. Proxy handlers still control their own
-+ * output and must honor this setting themselves if they override fun_toString.
++ * In V8 mode, class-callable objects other than proxies and bound functions use
++ * the JSClass name instead of their ObjectOps::funToString hook. SpiderMonkey
++ * keeps existing hook dispatch (or rejection when no hook is installed).
++ * Proxy handlers still control their own output and must honor this setting
++ * themselves if they override fun_toString.
   * Real source text and the non-standard toSource extension are unchanged.
   * Like SetStackFormat, this setting belongs to the root runtime and is
   * inherited by child runtimes. The setter must be called on the root runtime's
 diff --git a/js/src/jsapi-tests/testFunctionProperties.cpp b/js/src/jsapi-tests/testFunctionProperties.cpp
-index 1cf4e8f..325fc22 100644
+index 1cf4e8f..1e26063 100644
 --- a/js/src/jsapi-tests/testFunctionProperties.cpp
 +++ b/js/src/jsapi-tests/testFunctionProperties.cpp
-@@ -81,3 +81,108 @@ JSObject* createGlobal(JSPrincipals* principals = nullptr) override {
+@@ -81,3 +81,107 @@ JSObject* createGlobal(JSPrincipals* principals = nullptr) override {
  }
  
  END_TEST(testNativeFunctionSourceFormat)
@@ -64,7 +66,6 @@ index 1cf4e8f..325fc22 100644
 +      "Object.defineProperty(classCallable, 'name', {"
 +      "  get() { throw new Error('unexpected name lookup'); }"
 +      "});"
-+      "var originalClassSource = Function.prototype.toSource.call(classCallable);"
 +      "function sourceOf(f) {"
 +      "  try { return Function.prototype.toString.call(f); }"
 +      "  catch (e) { if (e instanceof TypeError) return 'TypeError'; throw e; }"

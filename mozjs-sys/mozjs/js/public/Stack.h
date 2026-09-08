@@ -74,9 +74,11 @@ enum class NativeFunctionSourceFormat { SpiderMonkey, V8 };
  * Select the Function.prototype.toString representation for functions without
  * source text. SpiderMonkey (the default) uses a multi-line native-code body;
  * V8 uses a single-line body and preserves native accessor name prefixes.
- * In V8 mode, non-proxy class-callable objects use the JSClass name instead of
- * their ObjectOps::funToString hook. Proxy handlers still control their own
- * output and must honor this setting themselves if they override fun_toString.
+ * In V8 mode, class-callable objects other than proxies and bound functions use
+ * the JSClass name instead of their ObjectOps::funToString hook. SpiderMonkey
+ * keeps existing hook dispatch (or rejection when no hook is installed).
+ * Proxy handlers still control their own output and must honor this setting
+ * themselves if they override fun_toString.
  * Real source text and the non-standard toSource extension are unchanged.
  * Like SetStackFormat, this setting belongs to the root runtime and is
  * inherited by child runtimes. The setter must be called on the root runtime's

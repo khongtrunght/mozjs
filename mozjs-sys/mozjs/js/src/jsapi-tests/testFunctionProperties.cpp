@@ -125,7 +125,6 @@ BEGIN_TEST(testNativeFunctionSourceFormat_ClassCallable) {
       "Object.defineProperty(classCallable, 'name', {"
       "  get() { throw new Error('unexpected name lookup'); }"
       "});"
-      "var originalClassSource = Function.prototype.toSource.call(classCallable);"
       "function sourceOf(f) {"
       "  try { return Function.prototype.toString.call(f); }"
       "  catch (e) { if (e instanceof TypeError) return 'TypeError'; throw e; }"
