@@ -126,10 +126,10 @@ index 1cf4e8f..325fc22 100644
 +
 +END_TEST(testNativeFunctionSourceFormat_ClassCallable)
 diff --git a/js/src/vm/JSFunction.cpp b/js/src/vm/JSFunction.cpp
-index b4977ed..159ea9e 100644
+index b4977ed..67759d9 100644
 --- a/js/src/vm/JSFunction.cpp
 +++ b/js/src/vm/JSFunction.cpp
-@@ -1019,6 +1019,21 @@ JSString* js::FunctionToString(JSContext* cx, HandleFunction fun,
+@@ -1019,6 +1019,22 @@ JSString* js::FunctionToString(JSContext* cx, HandleFunction fun,
  JSString* js::fun_toStringHelper(JSContext* cx, HandleObject obj,
                                   bool isToSource) {
    if (!obj->is<JSFunction>()) {
@@ -141,7 +141,8 @@ index b4977ed..159ea9e 100644
 +        !obj->is<ProxyObject>() && !obj->is<BoundFunctionObject>() &&
 +        obj->isCallable()) {
 +      JSStringBuilder out(cx);
-+      if (!out.append("function ") || !out.append(obj->getClass()->name) ||
++      const char* name = obj->getClass()->name;
++      if (!out.append("function ") || !out.append(name, strlen(name)) ||
 +          !out.append("() { [native code] }")) {
 +        return nullptr;
 +      }

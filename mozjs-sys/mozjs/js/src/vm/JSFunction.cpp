@@ -1027,7 +1027,8 @@ JSString* js::fun_toStringHelper(JSContext* cx, HandleObject obj,
         !obj->is<ProxyObject>() && !obj->is<BoundFunctionObject>() &&
         obj->isCallable()) {
       JSStringBuilder out(cx);
-      if (!out.append("function ") || !out.append(obj->getClass()->name) ||
+      const char* name = obj->getClass()->name;
+      if (!out.append("function ") || !out.append(name, strlen(name)) ||
           !out.append("() { [native code] }")) {
         return nullptr;
       }
