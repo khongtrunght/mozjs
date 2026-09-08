@@ -1,0 +1,153 @@
+diff --git a/js/public/Stack.h b/js/public/Stack.h
+index 14ff26c..2ab1e23 100644
+--- a/js/public/Stack.h
++++ b/js/public/Stack.h
+@@ -74,6 +74,9 @@ enum class NativeFunctionSourceFormat { SpiderMonkey, V8 };
+  * Select the Function.prototype.toString representation for functions without
+  * source text. SpiderMonkey (the default) uses a multi-line native-code body;
+  * V8 uses a single-line body and preserves native accessor name prefixes.
++ * In V8 mode, non-proxy class-callable objects use the JSClass name instead of
++ * their ObjectOps::funToString hook. Proxy handlers still control their own
++ * output and must honor this setting themselves if they override fun_toString.
+  * Real source text and the non-standard toSource extension are unchanged.
+  * Like SetStackFormat, this setting belongs to the root runtime and is
+  * inherited by child runtimes. The setter must be called on the root runtime's
+diff --git a/js/src/jsapi-tests/testFunctionProperties.cpp b/js/src/jsapi-tests/testFunctionProperties.cpp
+index 1cf4e8f..325fc22 100644
+--- a/js/src/jsapi-tests/testFunctionProperties.cpp
++++ b/js/src/jsapi-tests/testFunctionProperties.cpp
+@@ -81,3 +81,108 @@ JSObject* createGlobal(JSPrincipals* principals = nullptr) override {
+ }
+ 
+ END_TEST(testNativeFunctionSourceFormat)
++
++static bool ClassCallableHook(JSContext* cx, unsigned argc, JS::Value* vp) {
++  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++  args.rval().setObject(args.callee());
++  return true;
++}
++
++static JSString* LegacyClassSource(JSContext* cx, JS::HandleObject obj,
++                                   bool isToSource) {
++  return JS_NewStringCopyZ(cx, "function Blob() {\n    [native code]\n}");
++}
++
++BEGIN_TEST(testNativeFunctionSourceFormat_ClassCallable) {
++  static const JSClassOps classOps = {
++      .call = ClassCallableHook,
++      .construct = ClassCallableHook,
++  };
++  static const js::ObjectOps objectOps = {
++      .funToString = LegacyClassSource,
++  };
++  static const JSClass classCallable = {
++      "Blob", 0, &classOps, nullptr, nullptr, &objectOps};
++  static const JSClass bareCallable = {"BareCallable", 0, &classOps};
++  static const JSClass anonymousCallable = {"", 0, &classOps};
++  const struct {
++    const char* name;
++    const JSClass* clasp;
++  } classes[] = {
++      {"classCallable", &classCallable},
++      {"bareCallable", &bareCallable},
++      {"anonymousCallable", &anonymousCallable},
++  };
++  for (const auto& test : classes) {
++    JS::RootedObject object(cx, JS_NewObject(cx, test.clasp));
++    CHECK(object);
++    CHECK(JS_DefineProperty(cx, global, test.name, object, 0));
++  }
++  EXEC(
++      "var classProxy = new Proxy(classCallable, {});"
++      "var classBound = Function.prototype.bind.call(classCallable, null);"
++      "var revoked = Proxy.revocable(classCallable, {}); revoked.revoke();"
++      "Object.defineProperty(classCallable, 'name', {"
++      "  get() { throw new Error('unexpected name lookup'); }"
++      "});"
++      "var originalClassSource = Function.prototype.toSource.call(classCallable);"
++      "function sourceOf(f) {"
++      "  try { return Function.prototype.toString.call(f); }"
++      "  catch (e) { if (e instanceof TypeError) return 'TypeError'; throw e; }"
++      "}");
++
++  const struct {
++    const char* expression;
++    const char* spiderMonkey;
++    const char* v8;
++  } cases[] = {
++      {"sourceOf(classCallable)", "function Blob() {\n    [native code]\n}",
++       "function Blob() { [native code] }"},
++      {"sourceOf(bareCallable)", "TypeError",
++       "function BareCallable() { [native code] }"},
++      {"sourceOf(anonymousCallable)", "TypeError",
++       "function () { [native code] }"},
++      {"sourceOf(classProxy)", "function () {\n    [native code]\n}",
++       "function () { [native code] }"},
++      {"sourceOf(classBound)", "function() {\n    [native code]\n}",
++       "function () { [native code] }"},
++      {"sourceOf(revoked.proxy)", "function () {\n    [native code]\n}",
++       "function () { [native code] }"},
++      {"String(Object.getOwnPropertyDescriptor(Map.prototype, 'size').get)",
++       "function size() {\n    [native code]\n}",
++       "function get size() { [native code] }"},
++      {"Function.prototype.toSource.call(classCallable)",
++       "function Blob() {\n    [native code]\n}",
++       "function Blob() {\n    [native code]\n}"},
++      {"sourceOf({})", "TypeError", "TypeError"},
++  };
++
++  for (auto format : {JS::NativeFunctionSourceFormat::SpiderMonkey,
++                      JS::NativeFunctionSourceFormat::V8,
++                      JS::NativeFunctionSourceFormat::SpiderMonkey}) {
++    JS::SetNativeFunctionSourceFormat(cx, format);
++    for (const auto& test : cases) {
++      JS::RootedValue result(cx);
++      CHECK(evaluate(test.expression, __FILE__, __LINE__, &result));
++      CHECK(result.isString());
++      JS::RootedString source(cx, result.toString());
++      JS::UniqueChars bytes = JS_EncodeStringToUTF8(cx, source);
++      CHECK(bytes);
++      const char* expected = format == JS::NativeFunctionSourceFormat::V8
++                                 ? test.v8
++                                 : test.spiderMonkey;
++      CHECK(strcmp(bytes.get(), expected) == 0);
++    }
++  }
++  return true;
++}
++
++JSObject* createGlobal(JSPrincipals* principals = nullptr) override {
++  JS::RealmOptions options;
++  options.creationOptions().setToSourceEnabled(true);
++  global = JS_NewGlobalObject(cx, getGlobalClass(), principals,
++                              JS::FireOnNewGlobalHook, options);
++  return global;
++}
++
++END_TEST(testNativeFunctionSourceFormat_ClassCallable)
+diff --git a/js/src/vm/JSFunction.cpp b/js/src/vm/JSFunction.cpp
+index b4977ed..159ea9e 100644
+--- a/js/src/vm/JSFunction.cpp
++++ b/js/src/vm/JSFunction.cpp
+@@ -1019,6 +1019,21 @@ JSString* js::FunctionToString(JSContext* cx, HandleFunction fun,
+ JSString* js::fun_toStringHelper(JSContext* cx, HandleObject obj,
+                                  bool isToSource) {
+   if (!obj->is<JSFunction>()) {
++    // Class-callable embedder objects have no JSFunction name metadata. Use
++    // their class name without invoking user code. Proxies and bound functions
++    // retain their own dispatch (including proxy access checks and anonymity).
++    if (!isToSource && cx->runtime()->nativeFunctionSourceFormat() ==
++                           JS::NativeFunctionSourceFormat::V8 &&
++        !obj->is<ProxyObject>() && !obj->is<BoundFunctionObject>() &&
++        obj->isCallable()) {
++      JSStringBuilder out(cx);
++      if (!out.append("function ") || !out.append(obj->getClass()->name) ||
++          !out.append("() { [native code] }")) {
++        return nullptr;
++      }
++      return out.finishString();
++    }
++
+     if (JSFunToStringOp op = obj->getOpsFunToString()) {
+       return op(cx, obj, isToSource);
+     }

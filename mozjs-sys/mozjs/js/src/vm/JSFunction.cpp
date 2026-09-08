@@ -1019,6 +1019,21 @@ JSString* js::FunctionToString(JSContext* cx, HandleFunction fun,
 JSString* js::fun_toStringHelper(JSContext* cx, HandleObject obj,
                                  bool isToSource) {
   if (!obj->is<JSFunction>()) {
+    // Class-callable embedder objects have no JSFunction name metadata. Use
+    // their class name without invoking user code. Proxies and bound functions
+    // retain their own dispatch (including proxy access checks and anonymity).
+    if (!isToSource && cx->runtime()->nativeFunctionSourceFormat() ==
+                           JS::NativeFunctionSourceFormat::V8 &&
+        !obj->is<ProxyObject>() && !obj->is<BoundFunctionObject>() &&
+        obj->isCallable()) {
+      JSStringBuilder out(cx);
+      if (!out.append("function ") || !out.append(obj->getClass()->name) ||
+          !out.append("() { [native code] }")) {
+        return nullptr;
+      }
+      return out.finishString();
+    }
+
     if (JSFunToStringOp op = obj->getOpsFunToString()) {
       return op(cx, obj, isToSource);
     }
