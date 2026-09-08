@@ -1,0 +1,575 @@
+diff --git a/js/src/vm/SavedFrame.h b/js/src/vm/SavedFrame.h
+index d777397..e14c462 100644
+--- a/js/src/vm/SavedFrame.h
++++ b/js/src/vm/SavedFrame.h
+@@ -53,6 +53,8 @@ class SavedFrame : public NativeObject {
+   JS::TaggedColumnNumberOneOrigin getColumn();
+   JSAtom* getFunctionDisplayName();
+   JSAtom* getV8FunctionName();
++  JSAtom* getV8ReceiverTypeName();
++  JSAtom* getV8CallSiteName();
+   bool isConstructing();
+   JSAtom* getAsyncCause();
+   SavedFrame* getParent() const;
+@@ -127,6 +129,8 @@ class SavedFrame : public NativeObject {
+   void initColumn(JS::TaggedColumnNumberOneOrigin column);
+   void initFunctionDisplayName(JSAtom* maybeName);
+   void initV8FunctionName(JSAtom* maybeName);
++  void initV8ReceiverTypeName(JSAtom* maybeName);
++  void initV8CallSiteName(JSAtom* maybeName);
+   void initIsConstructing(bool constructing);
+   void initAsyncCause(JSAtom* maybeCause);
+   void initParent(SavedFrame* maybeParent);
+@@ -142,6 +146,8 @@ class SavedFrame : public NativeObject {
+     JSSLOT_COLUMN,
+     JSSLOT_FUNCTIONDISPLAYNAME,
+     JSSLOT_V8FUNCTIONNAME,
++    JSSLOT_V8RECEIVERTYPENAME,
++    JSSLOT_V8CALLSITENAME,
+     JSSLOT_ISCONSTRUCTING,
+     JSSLOT_ASYNCCAUSE,
+     JSSLOT_PARENT,
+diff --git a/js/src/vm/SavedStacks.cpp b/js/src/vm/SavedStacks.cpp
+index 852ef7c..bc7116e 100644
+--- a/js/src/vm/SavedStacks.cpp
++++ b/js/src/vm/SavedStacks.cpp
+@@ -27,6 +27,7 @@
+ #include "util/DifferentialTesting.h"
+ #include "util/RandomSeed.h"
+ #include "util/StringBuilder.h"
++#include "util/Unicode.h"
+ #include "vm/Compartment.h"
+ #include "vm/FrameIter.h"
+ #include "vm/GeckoProfiler.h"
+@@ -177,13 +178,16 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
+          bool mutedErrors,
+          const Maybe<LiveSavedFrameCache::FramePtr>& framePtr = Nothing(),
+          jsbytecode* pc = nullptr, Activation* activation = nullptr,
+-         JSAtom* v8FunctionName = nullptr, bool isConstructing = false)
++         JSAtom* v8FunctionName = nullptr, JSAtom* v8ReceiverTypeName = nullptr,
++         JSAtom* v8CallSiteName = nullptr, bool isConstructing = false)
+       : source(source),
+         sourceId(sourceId),
+         line(line),
+         column(column),
+         functionDisplayName(functionDisplayName),
+         v8FunctionName(v8FunctionName),
++        v8ReceiverTypeName(v8ReceiverTypeName),
++        v8CallSiteName(v8CallSiteName),
+         isConstructing(isConstructing),
+         asyncCause(asyncCause),
+         parent(parent),
+@@ -206,6 +210,8 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
+         column(savedFrame.getColumn()),
+         functionDisplayName(savedFrame.getFunctionDisplayName()),
+         v8FunctionName(savedFrame.getV8FunctionName()),
++        v8ReceiverTypeName(savedFrame.getV8ReceiverTypeName()),
++        v8CallSiteName(savedFrame.getV8CallSiteName()),
+         isConstructing(savedFrame.isConstructing()),
+         asyncCause(savedFrame.getAsyncCause()),
+         parent(savedFrame.getParent()),
+@@ -228,6 +234,8 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
+ 
+   JSAtom* functionDisplayName;
+   JSAtom* v8FunctionName;
++  JSAtom* v8ReceiverTypeName;
++  JSAtom* v8CallSiteName;
+   bool isConstructing;
+   JSAtom* asyncCause;
+   SavedFrame* parent;
+@@ -245,6 +253,9 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
+     TraceRoot(trc, &functionDisplayName,
+               "SavedFrame::Lookup::functionDisplayName");
+     TraceRoot(trc, &v8FunctionName, "SavedFrame::Lookup::v8FunctionName");
++    TraceRoot(trc, &v8ReceiverTypeName,
++              "SavedFrame::Lookup::v8ReceiverTypeName");
++    TraceRoot(trc, &v8CallSiteName, "SavedFrame::Lookup::v8CallSiteName");
+     TraceRoot(trc, &asyncCause, "SavedFrame::Lookup::asyncCause");
+     TraceRoot(trc, &parent, "SavedFrame::Lookup::parent");
+   }
+@@ -265,6 +276,8 @@ class WrappedPtrOperations<SavedFrame::Lookup, Wrapper> {
+   uint32_t line() { return value().line; }
+   JS::TaggedColumnNumberOneOrigin column() { return value().column; }
+   JSAtom* functionDisplayName() { return value().functionDisplayName; }
++  JSAtom* v8ReceiverTypeName() { return value().v8ReceiverTypeName; }
++  JSAtom* v8CallSiteName() { return value().v8CallSiteName; }
+   JSAtom* v8FunctionName() { return value().v8FunctionName; }
+   bool isConstructing() { return value().isConstructing; }
+   JSAtom* asyncCause() { return value().asyncCause; }
+@@ -324,9 +337,9 @@ HashNumber SavedFrame::HashPolicy::calculateHash(const Lookup& lookup,
+   // and add another overload of AddToHash with more arguments.
+   return AddToHash(lookup.line, lookup.column.rawValue(), lookup.source,
+                    lookup.functionDisplayName, lookup.v8FunctionName,
+-                   lookup.isConstructing, lookup.asyncCause,
+-                   lookup.mutedErrors, parentHash,
+-                   JSPrincipalsPtrHasher::hash(lookup.principals));
++                   lookup.v8ReceiverTypeName, lookup.v8CallSiteName,
++                   lookup.isConstructing, lookup.asyncCause, lookup.mutedErrors,
++                   parentHash, JSPrincipalsPtrHasher::hash(lookup.principals));
+ }
+ 
+ /* static */
+@@ -360,6 +373,8 @@ bool SavedFrame::HashPolicy::match(SavedFrame* existing, const Lookup& lookup) {
+   }
+ 
+   if (existing->getV8FunctionName() != lookup.v8FunctionName ||
++      existing->getV8ReceiverTypeName() != lookup.v8ReceiverTypeName ||
++      existing->getV8CallSiteName() != lookup.v8CallSiteName ||
+       existing->isConstructing() != lookup.isConstructing) {
+     return false;
+   }
+@@ -486,6 +501,16 @@ JSAtom* SavedFrame::getV8FunctionName() {
+   return v.isString() ? &v.toString()->asAtom() : nullptr;
+ }
+ 
++JSAtom* SavedFrame::getV8ReceiverTypeName() {
++  const Value& v = getReservedSlot(JSSLOT_V8RECEIVERTYPENAME);
++  return v.isString() ? &v.toString()->asAtom() : nullptr;
++}
++
++JSAtom* SavedFrame::getV8CallSiteName() {
++  const Value& v = getReservedSlot(JSSLOT_V8CALLSITENAME);
++  return v.isString() ? &v.toString()->asAtom() : nullptr;
++}
++
+ bool SavedFrame::isConstructing() {
+   const Value& v = getReservedSlot(JSSLOT_ISCONSTRUCTING);
+   return v.isBoolean() && v.toBoolean();
+@@ -571,6 +596,16 @@ void SavedFrame::initIsConstructing(bool constructing) {
+   initReservedSlot(JSSLOT_ISCONSTRUCTING, BooleanValue(constructing));
+ }
+ 
++void SavedFrame::initV8ReceiverTypeName(JSAtom* maybeName) {
++  initReservedSlot(JSSLOT_V8RECEIVERTYPENAME,
++                   maybeName ? StringValue(maybeName) : NullValue());
++}
++
++void SavedFrame::initV8CallSiteName(JSAtom* maybeName) {
++  initReservedSlot(JSSLOT_V8CALLSITENAME,
++                   maybeName ? StringValue(maybeName) : NullValue());
++}
++
+ void SavedFrame::initAsyncCause(JSAtom* maybeCause) {
+   initReservedSlot(JSSLOT_ASYNCCAUSE,
+                    maybeCause ? StringValue(maybeCause) : NullValue());
+@@ -595,6 +630,12 @@ void SavedFrame::initFromLookup(JSContext* cx, Handle<Lookup> lookup) {
+   if (lookup.v8FunctionName()) {
+     cx->markAtom(lookup.v8FunctionName());
+   }
++  if (lookup.v8ReceiverTypeName()) {
++    cx->markAtom(lookup.v8ReceiverTypeName());
++  }
++  if (lookup.v8CallSiteName()) {
++    cx->markAtom(lookup.v8CallSiteName());
++  }
+   if (lookup.asyncCause()) {
+     cx->markAtom(lookup.asyncCause());
+   }
+@@ -605,6 +646,8 @@ void SavedFrame::initFromLookup(JSContext* cx, Handle<Lookup> lookup) {
+   initColumn(lookup.column());
+   initFunctionDisplayName(lookup.functionDisplayName());
+   initV8FunctionName(lookup.v8FunctionName());
++  initV8ReceiverTypeName(lookup.v8ReceiverTypeName());
++  initV8CallSiteName(lookup.v8CallSiteName());
+   initIsConstructing(lookup.isConstructing());
+   initAsyncCause(lookup.asyncCause());
+   initParent(lookup.parent());
+@@ -1066,22 +1109,352 @@ static bool FormatSpiderMonkeyStackFrame(JSContext* cx, js::StringBuilder& sb,
+          FormatStackFrameColumn(sb, frame) && sb.append('\n');
+ }
+ 
++// ---------------------------------------------------------------------------
++// V8-style method-call frame naming. Mirror of CallSiteInfo::GetTypeName,
++// GetMethodName, InferMethodName, StringEndsWithMethodName and
++// AppendMethodCall in v8/src/objects/call-site-info.cc.
++//
++// Receiver-derived names are captured eagerly (in SavedStacks::insertFrames)
++// and stored on the SavedFrame: formatting a saved stack must never inspect
++// live objects. All lookups below are pure shape walks -- no getters are
++// invoked and no user code can run.
++// ---------------------------------------------------------------------------
++
++// v8 String::IsIdentifier: IdentifierStart for the first character,
++// IdentifierPart for all others.
++static bool V8StringIsIdentifier(JSAtom* atom) {
++  size_t length = atom->length();
++  if (length == 0) {
++    return false;
++  }
++  if (!unicode::IsIdentifierStart(atom->latin1OrTwoByteChar(0))) {
++    return false;
++  }
++  for (size_t i = 1; i < length; i++) {
++    if (!unicode::IsIdentifierPart(atom->latin1OrTwoByteChar(i))) {
++      return false;
++    }
++  }
++  return true;
++}
++
++// Returns true iff subject == method, or subject ends with '.' + method or
++// ' ' + method (v8 StringEndsWithMethodName). Both arguments are atoms, so
++// pointer equality covers the whole-string case.
++static bool V8StringEndsWithMethodName(JSAtom* subject, JSAtom* method) {
++  if (subject == method) {
++    return true;
++  }
++  size_t subjectLength = subject->length();
++  size_t methodLength = method->length();
++  if (subjectLength <= methodLength) {
++    return false;
++  }
++  size_t separatorIndex = subjectLength - methodLength - 1;
++  char32_t separator = subject->latin1OrTwoByteChar(separatorIndex);
++  if (separator != '.' && separator != ' ') {
++    return false;
++  }
++  for (size_t i = 0; i < methodLength; i++) {
++    if (subject->latin1OrTwoByteChar(separatorIndex + 1 + i) !=
++        method->latin1OrTwoByteChar(i)) {
++      return false;
++    }
++  }
++  return true;
++}
++
++// The debug name of a function (v8 SharedFunctionInfo::DebugName): the
++// explicit, inferred or guessed atom. Accessors with lazy names have only a
++// partial name, which we must not expose. Returns null when the function has
++// no usable name.
++static JSAtom* V8FunctionDebugName(JSFunction* fun) {
++  if (fun->isAccessorWithLazyName()) {
++    return nullptr;
++  }
++  return fun->rawAtom();
++}
++
++// v8 CallSiteInfo::GetMethodName's candidate: the function name with a
++// leading "get " / "set " stripped, otherwise the substring after the last
++// '.'. Returns false on OOM; *out is null when no candidate exists.
++static bool V8DeriveMethodNameCandidate(JSContext* cx, Handle<JSAtom*> v8Name,
++                                        MutableHandle<JSAtom*> out) {
++  out.set(nullptr);
++  if (!v8Name || v8Name->length() == 0) {
++    return true;
++  }
++
++  size_t length = v8Name->length();
++  size_t start = 0;
++  if (length > 4) {
++    auto prefixIs = [&](const char* prefix) {
++      return v8Name->latin1OrTwoByteChar(0) == prefix[0] &&
++             v8Name->latin1OrTwoByteChar(1) == prefix[1] &&
++             v8Name->latin1OrTwoByteChar(2) == prefix[2] &&
++             v8Name->latin1OrTwoByteChar(3) == ' ';
++    };
++    if (prefixIs("get") || prefixIs("set")) {
++      start = 4;
++    }
++  }
++  if (start == 0) {
++    // No accessor prefix: use the last '.'-segment of the (inferred) name,
++    // e.g. "receiver.method" for a property-assignment inferred name.
++    for (size_t i = length; i-- > 0;) {
++      if (v8Name->latin1OrTwoByteChar(i) == '.') {
++        start = i + 1;
++        break;
++      }
++    }
++    if (start == 0) {
++      out.set(v8Name);
++      return true;
++    }
++  }
++
++  size_t candidateLength = length - start;
++  if (candidateLength == 0) {
++    return true;
++  }
++  JSString* str = NewDependentString(cx, v8Name, start, candidateLength);
++  if (!str) {
++    return false;
++  }
++  out.set(AtomizeString(cx, str));
++  return !!out;
++}
++
++// v8 CallSiteInfo::GetTypeName / Object::ToObject: the receiver used for
++// method naming. Null/undefined receivers were rejected by the caller;
++// primitives are boxed so the standard prototype chain can be walked.
++static bool V8ToObjectReceiver(JSContext* cx, HandleValue receiver,
++                               MutableHandleObject out) {
++  if (receiver.isObject()) {
++    out.set(&receiver.toObject());
++    return true;
++  }
++  out.set(PrimitiveToObject(cx, receiver));
++  return !!out;
++}
++
++// v8 JSReceiver::GetConstructorName: walk the prototype chain and return the
++// name of the first own "constructor" data property that holds a named
++// function; empty names keep the walk going. Falls back to the object's
++// class name ("Object" for plain objects). Stops at non-native objects:
++// walking through a proxy would invoke user traps.
++static JSAtom* V8GetConstructorName(JSContext* cx,
++                                    Handle<JSObject*> receiver) {
++  PropertyKey constructorKey = PropertyKey::NonIntAtom(cx->names().constructor);
++  Rooted<JSObject*> current(cx, receiver);
++  while (current) {
++    if (!current->is<NativeObject>()) {
++      break;
++    }
++    NativeObject& obj = current->as<NativeObject>();
++
++    JSAtom* name = nullptr;
++    for (ShapePropertyIter<NoGC> iter(obj.shape()); !iter.done(); iter++) {
++      PropertyInfoWithKey prop = *iter;
++      if (prop.key() != constructorKey) {
++        continue;
++      }
++      if (prop.isDataProperty()) {
++        const Value& value = obj.getSlot(prop.slot());
++        if (value.isObject() && value.toObject().is<JSFunction>()) {
++          name = V8FunctionDebugName(&value.toObject().as<JSFunction>());
++        }
++      }
++      break;
++    }
++    if (name && name->length() != 0) {
++      return name;
++    }
++
++    current = obj.staticPrototype();
++  }
++
++  // Fallback: the receiver's C++ class name (v8 receiver->class_name()).
++  // JSAtomUtils only instantiates AtomizeChars for Latin1Char/char16_t; class
++  // names are ASCII, so reinterpret them as Latin-1.
++  const char* className = receiver->getClass()->name;
++  return AtomizeChars(cx, reinterpret_cast<const Latin1Char*>(className),
++                      strlen(className));
++}
++
++// v8 CallSiteInfo::GetTypeName.
++static JSAtom* V8GetTypeName(JSContext* cx, Handle<JSObject*> receiver) {
++  if (receiver->is<ProxyObject>()) {
++    return cx->names().Proxy;
++  }
++  if (receiver->is<JSFunction>()) {
++    JSAtom* name = V8FunctionDebugName(&receiver->as<JSFunction>());
++    if (name && name->length() != 0) {
++      return name;
++    }
++  }
++  return V8GetConstructorName(cx, receiver);
++}
++
++// True when |candidate| names an own or inherited property of the receiver
++// whose value is identical to |fun| -- a data value, or a getter/setter of
++// an accessor pair (v8 LookupIterator::PROTOTYPE_CHAIN_SKIP_INTERCEPTOR,
++// reduced to a shape walk that cannot invoke user code).
++static bool V8MethodNameMatches(JSContext* cx, Handle<JSObject*> receiver,
++                                Handle<JSAtom*> candidate, JSFunction* fun) {
++  PropertyKey key = PropertyKey::NonIntAtom(candidate);
++  Rooted<JSObject*> current(cx, receiver);
++  while (current) {
++    if (!current->is<NativeObject>()) {
++      break;
++    }
++    NativeObject& obj = current->as<NativeObject>();
++    for (ShapePropertyIter<NoGC> iter(obj.shape()); !iter.done(); iter++) {
++      PropertyInfoWithKey prop = *iter;
++      if (prop.key() != key) {
++        continue;
++      }
++      if (prop.isDataProperty()) {
++        const Value& value = obj.getSlot(prop.slot());
++        return value.isObject() && &value.toObject() == fun;
++      }
++      if (prop.isAccessorProperty()) {
++        GetterSetter* gs = obj.getGetterSetter(prop);
++        return gs->getter() == fun || gs->setter() == fun;
++      }
++      return false;
++    }
++    current = obj.staticPrototype();
++  }
++  return false;
++}
++
++// v8 InferMethodName, restricted to the receiver's own properties: find the
++// unique enumerable own property whose value (data or accessor) is identical
++// to |fun|. Returns null when nothing, or more than one distinct property,
++// matches. Never walks the prototype chain.
++static JSAtom* V8InferMethodName(Handle<JSObject*> receiver, JSFunction* fun) {
++  if (!receiver->is<NativeObject>()) {
++    return nullptr;
++  }
++  NativeObject& obj = receiver->as<NativeObject>();
++  JSAtom* found = nullptr;
++  for (ShapePropertyIter<NoGC> iter(obj.shape()); !iter.done(); iter++) {
++    PropertyInfoWithKey prop = *iter;
++    if (!prop.enumerable() || !prop.key().isAtom()) {
++      continue;
++    }
++    bool matches = false;
++    if (prop.isDataProperty()) {
++      const Value& value = obj.getSlot(prop.slot());
++      matches = value.isObject() && &value.toObject() == fun;
++    } else if (prop.isAccessorProperty()) {
++      GetterSetter* gs = obj.getGetterSetter(prop);
++      matches = gs->getter() == fun || gs->setter() == fun;
++    }
++    if (!matches) {
++      continue;
++    }
++    JSAtom* key = prop.key().toAtom();
++    if (!found) {
++      found = key;
++    } else if (found != key) {
++      return nullptr;  // ambiguous: multiple distinct properties match
++    }
++  }
++  return found;
++}
++
++// v8 CallSiteInfo::GetMethodName.
++static bool V8GetMethodName(JSContext* cx, Handle<JSObject*> receiver,
++                            Handle<JSFunction*> fun, Handle<JSAtom*> v8Name,
++                            MutableHandle<JSAtom*> out) {
++  Rooted<JSAtom*> candidate(cx);
++  if (!V8DeriveMethodNameCandidate(cx, v8Name, &candidate)) {
++    return false;
++  }
++  if (candidate && V8MethodNameMatches(cx, receiver, candidate, fun)) {
++    out.set(candidate);
++    return true;
++  }
++  out.set(V8InferMethodName(receiver, fun));
++  return true;
++}
++
++// Eagerly capture the V8 method-call naming metadata for a non-constructing
++// function frame: the receiver type name ("Object.Se"'s "Object") and the
++// call site method name (the "render" of "[as render]"). Null/undefined
++// receivers produce no metadata, matching v8. Constructor frames never get
++// receiver metadata; they keep the plain "new X" formatting.
++static bool ComputeV8MethodCallNames(JSContext* cx, Handle<JSFunction*> fun,
++                                     HandleValue receiverValue,
++                                     Handle<JSAtom*> v8Name,
++                                     MutableHandle<JSAtom*> receiverTypeName,
++                                     MutableHandle<JSAtom*> callSiteName) {
++  receiverTypeName.set(nullptr);
++  callSiteName.set(nullptr);
++
++  if (receiverValue.isNullOrUndefined()) {
++    return true;
++  }
++
++  Rooted<JSObject*> receiver(cx);
++  if (!V8ToObjectReceiver(cx, receiverValue, &receiver)) {
++    return false;
++  }
++
++  receiverTypeName.set(V8GetTypeName(cx, receiver));
++  if (!receiverTypeName) {
++    return false;
++  }
++
++  return V8GetMethodName(cx, receiver, fun, v8Name, callSiteName);
++}
++
+ static bool FormatV8StackFrame(JSContext* cx, js::StringBuilder& sb,
+                                JS::Handle<js::SavedFrame*> frame, size_t indent,
+                                bool lastFrame) {
+-  // SavedFrame has no receiver/type metadata. Method frames use the explicit
+-  // or inferred function name, without a receiver-derived "C." / "Object."
+-  // prefix. Inspecting receivers here would require retaining live objects and
+-  // potentially invoking user code; formatting a saved stack must do neither.
++  // Method-call frames format as v8's AppendMethodCall: "Type.function" and,
++  // when the function name doesn't already end with the method name,
++  // "function [as method]". The receiver-derived metadata is captured
++  // eagerly in insertFrames (see ComputeV8MethodCallNames), so formatting
++  // never touches live objects. Constructor frames keep the plain
++  // "new name" form and ignore the receiver metadata entirely.
+   Rooted<JSAtom*> name(cx, frame->getV8FunctionName());
++  Rooted<JSAtom*> receiverType(cx, frame->getV8ReceiverTypeName());
++  Rooted<JSAtom*> methodName(cx, frame->getV8CallSiteName());
+   bool named = name && name->length();
+   bool constructing = frame->isConstructing();
+-  bool parentheses = named || constructing;
++  bool hasType = receiverType && receiverType->length() != 0;
++  bool hasMethod = methodName && methodName->length() != 0;
++
++  // v8 AppendMethodCall: the "Type." prefix requires a non-empty function
++  // name that is an identifier and differs from the type name; the "[as
++  // method]" suffix requires a method name the function name doesn't already
++  // end with ('.'- or ' '-separated).
++  bool prefixType = !constructing && named && hasType &&
++                    V8StringIsIdentifier(name) &&
++                    !EqualStrings(name, receiverType);
++  bool suffixAs = !constructing && named && hasMethod &&
++                  !V8StringEndsWithMethodName(name, methodName);
++
++  // A plain anonymous, non-constructor call has no name part at all:
++  // v8 emits "at url:line:col" without "<anonymous>" and without a location
++  // parenthesis pair. "<anonymous>" only appears for constructors or
++  // receiver-qualified frames ("Type.<anonymous>" / "Type.method").
++  bool anonymous = !named && (constructing || hasType || hasMethod);
++  bool parentheses = named || anonymous || prefixType || suffixAs;
+   return sb.appendN(' ', indent + 4) && sb.append("at ") &&
+          (!frame->getAsyncCause() || sb.append("async ")) &&
+          (!constructing || sb.append("new ")) &&
+-         (!named || sb.append(name)) &&
+-         (!constructing || named || sb.append("<anonymous>")) &&
++         (prefixType ? (sb.append(receiverType) && sb.append('.')) : true) &&
++         (named ? sb.append(name)
++                : (anonymous ? (hasMethod ? sb.append(methodName)
++                                          : sb.append("<anonymous>"))
++                             : true)) &&
++         (suffixAs ? (sb.append(" [as ") && sb.append(methodName) &&
++                      sb.append(']'))
++                   : true) &&
+          (!parentheses || sb.append(" (")) &&
+          sb.append(frame->getSource()) && sb.append(':') &&
+          FormatStackFrameLine(sb, frame) && sb.append(':') &&
+@@ -1557,6 +1930,8 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
+   RootedField<JSAtom*, 3> causeAtom(roots);
+   RootedField<SavedFrame*> asyncParent(roots);
+   Rooted<JSAtom*> v8Name(cx);
++  Rooted<JSAtom*> v8ReceiverTypeName(cx);
++  Rooted<JSAtom*> v8CallSiteName(cx);
+ 
+   while (!iter.done()) {
+     Activation& activation = *iter.activation();
+@@ -1659,6 +2034,18 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
+           return false;
+         }
+       }
++      if (!constructing) {
++        // V8 method-call naming: eagerly capture the receiver-derived type
++        // and method names for this frame. Constructing frames have no
++        // receiver prefix, so they keep the plain "new X" formatting.
++        Rooted<JSFunction*> rootedFun(cx, fun);
++        RootedValue receiver(cx, iter.thisArgument(cx));
++        if (!ComputeV8MethodCallNames(cx, rootedFun, receiver, v8Name,
++                                      &v8ReceiverTypeName,
++                                      &v8CallSiteName)) {
++          return false;
++        }
++      }
+     }
+ 
+     auto principals = iter.realm()->principals();
+@@ -1674,7 +2061,9 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
+                                   nullptr,  // asyncCause
+                                   nullptr,  // parent (not known yet)
+                                   principals, iter.mutedErrors(), framePtr,
+-                                  iter.pc(), &activation, v8Name, constructing)) {
++                                  iter.pc(), &activation, v8Name,
++                                  v8ReceiverTypeName, v8CallSiteName,
++                                  constructing)) {
+         return false;
+       }
+     }
