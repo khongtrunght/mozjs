@@ -8,6 +8,11 @@ EXPORTS += [
 
 Library('fdlibm')
 
+# log, log1p, and expm1 are delegated to the LLVM-libc implementations
+# vendored under llvmlibc/ (see e_log.cpp, s_log1p.cpp, s_expm1.cpp).
+DEFINES['LIBC_NAMESPACE'] = 'fdlibm_llvmlibc'
+LOCAL_INCLUDES += ['/modules/fdlibm/llvmlibc']
+
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += [
         '-Wno-parentheses',
