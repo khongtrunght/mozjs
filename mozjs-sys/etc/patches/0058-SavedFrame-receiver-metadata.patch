@@ -30,7 +30,7 @@ index d777397..e14c462 100644
      JSSLOT_ASYNCCAUSE,
      JSSLOT_PARENT,
 diff --git a/js/src/vm/SavedStacks.cpp b/js/src/vm/SavedStacks.cpp
-index 852ef7c..bc7116e 100644
+index 852ef7c..7c6e8cd 100644
 --- a/js/src/vm/SavedStacks.cpp
 +++ b/js/src/vm/SavedStacks.cpp
 @@ -27,6 +27,7 @@
@@ -174,7 +174,7 @@ index 852ef7c..bc7116e 100644
    initIsConstructing(lookup.isConstructing());
    initAsyncCause(lookup.asyncCause());
    initParent(lookup.parent());
-@@ -1066,22 +1109,352 @@ static bool FormatSpiderMonkeyStackFrame(JSContext* cx, js::StringBuilder& sb,
+@@ -1066,22 +1109,354 @@ static bool FormatSpiderMonkeyStackFrame(JSContext* cx, js::StringBuilder& sb,
           FormatStackFrameColumn(sb, frame) && sb.append('\n');
  }
  
@@ -286,7 +286,9 @@ index 852ef7c..bc7116e 100644
 +  if (candidateLength == 0) {
 +    return true;
 +  }
-+  JSString* str = NewDependentString(cx, v8Name, start, candidateLength);
++  // AtomizeString allocates and can GC; the dependent string must stay
++  // rooted across it.
++  RootedString str(cx, NewDependentString(cx, v8Name, start, candidateLength));
 +  if (!str) {
 +    return false;
 +  }
@@ -534,7 +536,7 @@ index 852ef7c..bc7116e 100644
           (!parentheses || sb.append(" (")) &&
           sb.append(frame->getSource()) && sb.append(':') &&
           FormatStackFrameLine(sb, frame) && sb.append(':') &&
-@@ -1557,6 +1930,8 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
+@@ -1557,6 +1932,8 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
    RootedField<JSAtom*, 3> causeAtom(roots);
    RootedField<SavedFrame*> asyncParent(roots);
    Rooted<JSAtom*> v8Name(cx);
@@ -543,7 +545,7 @@ index 852ef7c..bc7116e 100644
  
    while (!iter.done()) {
      Activation& activation = *iter.activation();
-@@ -1659,6 +2034,18 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
+@@ -1659,6 +2036,18 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
            return false;
          }
        }
@@ -562,7 +564,7 @@ index 852ef7c..bc7116e 100644
      }
  
      auto principals = iter.realm()->principals();
-@@ -1674,7 +2061,9 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
+@@ -1674,7 +2063,9 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
                                    nullptr,  // asyncCause
                                    nullptr,  // parent (not known yet)
                                    principals, iter.mutedErrors(), framePtr,
