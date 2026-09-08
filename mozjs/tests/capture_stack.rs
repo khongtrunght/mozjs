@@ -157,16 +157,17 @@ fn capture_stack() {
                 "function C() { return new Error().stack; } C()",
                 "    at C (v8_frames.js:1:23)",
             ),
-            // SavedFrame deliberately does not inspect or retain receivers.
+            // Receiver-derived "Type." prefixes are captured eagerly and
+            // mirror v8's method-call output.
             (
                 "class_method",
                 "{ class C { m() { return new Error().stack; } } new C().m(); }",
-                "    at m (v8_frames.js:1:26)",
+                "    at C.m (v8_frames.js:1:26)",
             ),
             (
                 "object_method",
                 "var o = { m() { return new Error().stack; } };\no.m()",
-                "    at m (v8_frames.js:1:24)",
+                "    at Object.m (v8_frames.js:1:24)",
             ),
             (
                 "async_direct",

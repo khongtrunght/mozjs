@@ -53,6 +53,8 @@ class SavedFrame : public NativeObject {
   JS::TaggedColumnNumberOneOrigin getColumn();
   JSAtom* getFunctionDisplayName();
   JSAtom* getV8FunctionName();
+  JSAtom* getV8ReceiverTypeName();
+  JSAtom* getV8CallSiteName();
   bool isConstructing();
   JSAtom* getAsyncCause();
   SavedFrame* getParent() const;
@@ -127,6 +129,8 @@ class SavedFrame : public NativeObject {
   void initColumn(JS::TaggedColumnNumberOneOrigin column);
   void initFunctionDisplayName(JSAtom* maybeName);
   void initV8FunctionName(JSAtom* maybeName);
+  void initV8ReceiverTypeName(JSAtom* maybeName);
+  void initV8CallSiteName(JSAtom* maybeName);
   void initIsConstructing(bool constructing);
   void initAsyncCause(JSAtom* maybeCause);
   void initParent(SavedFrame* maybeParent);
@@ -142,6 +146,8 @@ class SavedFrame : public NativeObject {
     JSSLOT_COLUMN,
     JSSLOT_FUNCTIONDISPLAYNAME,
     JSSLOT_V8FUNCTIONNAME,
+    JSSLOT_V8RECEIVERTYPENAME,
+    JSSLOT_V8CALLSITENAME,
     JSSLOT_ISCONSTRUCTING,
     JSSLOT_ASYNCCAUSE,
     JSSLOT_PARENT,
