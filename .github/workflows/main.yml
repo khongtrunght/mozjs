@@ -3,6 +3,15 @@ name: Rust
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      archive:
+        description: Which archive to build on demand
+        required: false
+        default: default
+        type: choice
+        options:
+          - default
+          - linux-x86_64
   merge_group:
     types: [checks_requested]
   schedule:
@@ -15,7 +24,10 @@ jobs:
     if: ${{ github.event_name != 'push' }}
     uses: ./.github/workflows/build.yml
     with:
-      macos_arm64_only: ${{ startsWith(github.ref_name, 'v8-identity') }}
+      # The identity fork only ever ships prebuilt archives, so it builds the
+      # host the lab runs on; `archive: linux-x86_64` adds the deploy target.
+      macos_arm64_only: ${{ inputs.archive != 'linux-x86_64' && startsWith(github.ref_name, 'v8-identity') }}
+      linux_x86_64_only: ${{ inputs.archive == 'linux-x86_64' }}
       verify_artifacts: ${{ !startsWith(github.ref_name, 'v8-identity') }}
     secrets: inherit
   latest_stable_rust:

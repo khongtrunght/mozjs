@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      linux_x86_64_only:
+        description: Build only the linux x86_64 release archive (deploy targets need it)
+        required: false
+        default: false
+        type: boolean
 
 env:
   RUST_BACKTRACE: 1
@@ -30,6 +35,7 @@ env:
 
 jobs:
   mac:
+    if: ${{ !inputs.linux_x86_64_only }}
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +85,7 @@ jobs:
           name: libmozjs-${{ matrix.platform.target }}${{ matrix.features && '-debugmozjs-O3' || '' }}.tar.gz
 
   linux:
-    if: ${{ !inputs.macos_arm64_only }}
+    if: ${{ inputs.linux_x86_64_only || !inputs.macos_arm64_only }}
     env:
       RUSTC_WRAPPER: "sccache"
       CCACHE: sccache
@@ -87,10 +93,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        features: ["debugmozjs", ""]
-        platform:
-          - { target: aarch64-unknown-linux-gnu, image: ubuntu-22.04-arm }
-          - { target: x86_64-unknown-linux-gnu, image: ubuntu-22.04 }
+        features: ${{ fromJSON(inputs.linux_x86_64_only && '[""]' || '["debugmozjs", ""]') }}
+        platform: ${{ fromJSON(inputs.linux_x86_64_only && '[{"target":"x86_64-unknown-linux-gnu","image":"ubuntu-22.04"}]' || '[{"target":"aarch64-unknown-linux-gnu","image":"ubuntu-22.04-arm"},{"target":"x86_64-unknown-linux-gnu","image":"ubuntu-22.04"}]') }}
     runs-on: ${{ matrix.platform.image }}
     steps:
       - uses: actions/checkout@v6
@@ -139,7 +143,7 @@ jobs:
           name: libmozjs-${{matrix.platform.target }}${{ matrix.features && '-debugmozjs-O3' || '' }}.tar.gz
 
   windows:
-    if: ${{ !inputs.macos_arm64_only }}
+    if: ${{ !inputs.macos_arm64_only && !inputs.linux_x86_64_only }}
     runs-on: ${{ matrix.platform.os }}
     strategy:
       fail-fast: false
@@ -193,7 +197,7 @@ jobs:
           name: libmozjs-${{ matrix.platform.target }}${{ matrix.features && '-debugmozjs-O3' || '' }}.tar.gz
 
   android:
-    if: ${{ !inputs.macos_arm64_only }}
+    if: ${{ !inputs.macos_arm64_only && !inputs.linux_x86_64_only }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -236,7 +240,7 @@ jobs:
           name: libmozjs-${{ matrix.target }}.tar.gz
 
   ohos:
-    if: ${{ !inputs.macos_arm64_only }}
+    if: ${{ !inputs.macos_arm64_only && !inputs.linux_x86_64_only }}
     name: "OpenHarmony"
     runs-on: ubuntu-latest
     strategy:
@@ -278,7 +282,7 @@ jobs:
         run: cargo +${{ steps.toolchain.outputs.name }} ohos build --target="${{ matrix.target }}" ${{ matrix.features }} --tests
 
   wasi:
-    if: ${{ !inputs.macos_arm64_only }}
+    if: ${{ !inputs.macos_arm64_only && !inputs.linux_x86_64_only }}
     name: wasm32-${{ matrix.target }}
     runs-on: ubuntu-latest
     strategy:
