@@ -179,7 +179,8 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
          const Maybe<LiveSavedFrameCache::FramePtr>& framePtr = Nothing(),
          jsbytecode* pc = nullptr, Activation* activation = nullptr,
          JSAtom* v8FunctionName = nullptr, JSAtom* v8ReceiverTypeName = nullptr,
-         JSAtom* v8CallSiteName = nullptr, bool isConstructing = false)
+         JSAtom* v8CallSiteName = nullptr, bool isConstructing = false,
+         SavedFrame::FrameKind frameKind = SavedFrame::FrameKind::Function)
       : source(source),
         sourceId(sourceId),
         line(line),
@@ -189,6 +190,7 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
         v8ReceiverTypeName(v8ReceiverTypeName),
         v8CallSiteName(v8CallSiteName),
         isConstructing(isConstructing),
+        frameKind(frameKind),
         asyncCause(asyncCause),
         parent(parent),
         principals(principals),
@@ -213,6 +215,7 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
         v8ReceiverTypeName(savedFrame.getV8ReceiverTypeName()),
         v8CallSiteName(savedFrame.getV8CallSiteName()),
         isConstructing(savedFrame.isConstructing()),
+        frameKind(savedFrame.getFrameKind()),
         asyncCause(savedFrame.getAsyncCause()),
         parent(savedFrame.getParent()),
         principals(savedFrame.getPrincipals()),
@@ -237,6 +240,7 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
   JSAtom* v8ReceiverTypeName;
   JSAtom* v8CallSiteName;
   bool isConstructing;
+  SavedFrame::FrameKind frameKind;
   JSAtom* asyncCause;
   SavedFrame* parent;
   JSPrincipals* principals;
@@ -280,6 +284,7 @@ class WrappedPtrOperations<SavedFrame::Lookup, Wrapper> {
   JSAtom* v8CallSiteName() { return value().v8CallSiteName; }
   JSAtom* v8FunctionName() { return value().v8FunctionName; }
   bool isConstructing() { return value().isConstructing; }
+  SavedFrame::FrameKind frameKind() { return value().frameKind; }
   JSAtom* asyncCause() { return value().asyncCause; }
   SavedFrame* parent() { return value().parent; }
   JSPrincipals* principals() { return value().principals; }
@@ -338,8 +343,9 @@ HashNumber SavedFrame::HashPolicy::calculateHash(const Lookup& lookup,
   return AddToHash(lookup.line, lookup.column.rawValue(), lookup.source,
                    lookup.functionDisplayName, lookup.v8FunctionName,
                    lookup.v8ReceiverTypeName, lookup.v8CallSiteName,
-                   lookup.isConstructing, lookup.asyncCause, lookup.mutedErrors,
-                   parentHash, JSPrincipalsPtrHasher::hash(lookup.principals));
+                   lookup.isConstructing, uint32_t(lookup.frameKind),
+                   lookup.asyncCause, lookup.mutedErrors, parentHash,
+                   JSPrincipalsPtrHasher::hash(lookup.principals));
 }
 
 /* static */
@@ -375,7 +381,8 @@ bool SavedFrame::HashPolicy::match(SavedFrame* existing, const Lookup& lookup) {
   if (existing->getV8FunctionName() != lookup.v8FunctionName ||
       existing->getV8ReceiverTypeName() != lookup.v8ReceiverTypeName ||
       existing->getV8CallSiteName() != lookup.v8CallSiteName ||
-      existing->isConstructing() != lookup.isConstructing) {
+      existing->isConstructing() != lookup.isConstructing ||
+      existing->getFrameKind() != lookup.frameKind) {
     return false;
   }
 
@@ -516,6 +523,11 @@ bool SavedFrame::isConstructing() {
   return v.isBoolean() && v.toBoolean();
 }
 
+SavedFrame::FrameKind SavedFrame::getFrameKind() {
+  const Value& v = getReservedSlot(JSSLOT_FRAMEKIND);
+  return FrameKind(v.toPrivateUint32());
+}
+
 JSAtom* SavedFrame::getAsyncCause() {
   const Value& v = getReservedSlot(JSSLOT_ASYNCCAUSE);
   if (v.isNull()) {
@@ -596,6 +608,10 @@ void SavedFrame::initIsConstructing(bool constructing) {
   initReservedSlot(JSSLOT_ISCONSTRUCTING, BooleanValue(constructing));
 }
 
+void SavedFrame::initFrameKind(FrameKind kind) {
+  initReservedSlot(JSSLOT_FRAMEKIND, PrivateUint32Value(uint32_t(kind)));
+}
+
 void SavedFrame::initV8ReceiverTypeName(JSAtom* maybeName) {
   initReservedSlot(JSSLOT_V8RECEIVERTYPENAME,
                    maybeName ? StringValue(maybeName) : NullValue());
@@ -649,6 +665,7 @@ void SavedFrame::initFromLookup(JSContext* cx, Handle<Lookup> lookup) {
   initV8ReceiverTypeName(lookup.v8ReceiverTypeName());
   initV8CallSiteName(lookup.v8CallSiteName());
   initIsConstructing(lookup.isConstructing());
+  initFrameKind(lookup.frameKind());
   initAsyncCause(lookup.asyncCause());
   initParent(lookup.parent());
   initPrincipalsAndMutedErrors(lookup.principals(), lookup.mutedErrors());
@@ -1465,22 +1482,40 @@ static bool FormatV8StackFrame(JSContext* cx, js::StringBuilder& sb,
 }
 
 // Match JavaScriptCore's `StackFrame::toString` and
-// `Interpreter::stackTraceAsString`: `function@source:line:column`, with
-// `global code` for the bottom-level script frame and no trailing newline.
-// SavedFrame does not retain JavaScriptCore's eval/module/native frame kinds,
-// so those names cannot be distinguished here.
+// `Interpreter::stackTraceAsString`: `function@source:line:column`, one frame
+// per line, no trailing newline after the last frame. Function frames carry
+// the function's explicit or ECMAScript-inferred name (an anonymous function
+// prints an empty name, just `@`), while top-level program, module and eval
+// frames print "global code", "module code" and "eval code". The name is the
+// same one captured for V8 mode; SpiderMonkey's diagnostic guessed names
+// ("enclosing/<") are never printed. Async frames keep the "async " prefix.
 static bool FormatWebKitStackFrame(JSContext* cx, js::StringBuilder& sb,
                                    JS::Handle<js::SavedFrame*> frame,
                                    size_t indent, bool skippedAsync,
                                    bool lastFrame) {
   RootedString asyncCause(cx, frame->getAsyncCause());
-  Rooted<JSAtom*> name(cx, frame->getFunctionDisplayName());
   bool isAsync = asyncCause || skippedAsync;
 
+  const char* topLevelName = nullptr;
+  switch (frame->getFrameKind()) {
+    case SavedFrame::FrameKind::Function:
+      break;
+    case SavedFrame::FrameKind::Global:
+      topLevelName = "global code";
+      break;
+    case SavedFrame::FrameKind::Eval:
+      topLevelName = "eval code";
+      break;
+    case SavedFrame::FrameKind::Module:
+      topLevelName = "module code";
+      break;
+  }
+
+  Rooted<JSAtom*> name(cx, frame->getV8FunctionName());
   return (!indent || sb.appendN(' ', indent)) &&
          (!isAsync || sb.append("async ")) &&
-         (name ? sb.append(name)
-               : (!lastFrame || sb.append("global code"))) &&
+         (topLevelName ? sb.append(topLevelName)
+                       : (name ? sb.append(name) : true)) &&
          sb.append('@') && sb.append(frame->getSource()) && sb.append(':') &&
          FormatStackFrameLine(sb, frame) && sb.append(':') &&
          FormatStackFrameColumn(sb, frame) && (lastFrame || sb.append('\n'));
@@ -2008,6 +2043,16 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
     displayAtom = iter.maybeFunctionDisplayAtom();
     v8Name = displayAtom;
     bool constructing = false;
+    SavedFrame::FrameKind frameKind;
+    if (iter.isEvalFrame()) {
+      frameKind = SavedFrame::FrameKind::Eval;
+    } else if (iter.isModuleFrame()) {
+      frameKind = SavedFrame::FrameKind::Module;
+    } else if (iter.isFunctionFrame() || iter.isWasm()) {
+      frameKind = SavedFrame::FrameKind::Function;
+    } else {
+      frameKind = SavedFrame::FrameKind::Global;
+    }
     if (iter.isFunctionFrame() && !iter.isWasm()) {
       JSFunction* fun = iter.calleeTemplate();
       constructing = iter.isConstructing();
@@ -2065,7 +2110,7 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
                                   principals, iter.mutedErrors(), framePtr,
                                   iter.pc(), &activation, v8Name,
                                   v8ReceiverTypeName, v8CallSiteName,
-                                  constructing)) {
+                                  constructing, frameKind)) {
         return false;
       }
     }

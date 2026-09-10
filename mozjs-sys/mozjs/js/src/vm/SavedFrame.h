@@ -56,6 +56,12 @@ class SavedFrame : public NativeObject {
   JSAtom* getV8ReceiverTypeName();
   JSAtom* getV8CallSiteName();
   bool isConstructing();
+
+  // Kind of frame this SavedFrame was captured for, recorded at capture
+  // time so formatters can name top-level program, module and eval frames
+  // the way JavaScriptCore does.
+  enum class FrameKind : uint32_t { Function, Global, Eval, Module };
+  FrameKind getFrameKind();
   JSAtom* getAsyncCause();
   SavedFrame* getParent() const;
   JSPrincipals* getPrincipals();
@@ -132,6 +138,7 @@ class SavedFrame : public NativeObject {
   void initV8ReceiverTypeName(JSAtom* maybeName);
   void initV8CallSiteName(JSAtom* maybeName);
   void initIsConstructing(bool constructing);
+  void initFrameKind(FrameKind kind);
   void initAsyncCause(JSAtom* maybeCause);
   void initParent(SavedFrame* maybeParent);
   void initPrincipalsAlreadyHeldAndMutedErrors(JSPrincipals* principals,
@@ -148,6 +155,7 @@ class SavedFrame : public NativeObject {
     JSSLOT_V8FUNCTIONNAME,
     JSSLOT_V8RECEIVERTYPENAME,
     JSSLOT_V8CALLSITENAME,
+    JSSLOT_FRAMEKIND,
     JSSLOT_ISCONSTRUCTING,
     JSSLOT_ASYNCCAUSE,
     JSSLOT_PARENT,

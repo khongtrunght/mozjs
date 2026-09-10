@@ -3875,6 +3875,10 @@ JSObject* JSStructuredCloneReader::readSavedFrameHeader(
     savedFrame->initIsConstructing(false);
   }
 
+  // The clone format carries no frame kind; cloned frames are recorded as
+  // plain function frames.
+  savedFrame->initFrameKind(SavedFrame::FrameKind::Function);
+
   return savedFrame;
 }
 

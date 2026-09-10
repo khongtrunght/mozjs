@@ -237,6 +237,60 @@ BEGIN_TEST(testSavedStacks_ErrorStackWebKit) {
 }
 END_TEST(testSavedStacks_ErrorStackWebKit)
 
+BEGIN_TEST(testSavedStacks_ErrorStackWebKitNames) {
+  js::SetStackFormat(cx, js::StackFormat::WebKit);
+
+  JS::RootedValue val(cx);
+  // A var-assigned function keeps its ECMAScript-inferred name; an anonymous
+  // callback prints an empty name (a bare '@'); the top-level frame prints
+  // "global code".
+  CHECK(
+      evaluate("var inferred = function () {          \n"  // 1
+               "  return timer(function () {          \n"  // 2
+               "    return new Error('foo');          \n"  // 3
+               "  });                                 \n"  // 4
+               "};                                    \n"  // 5
+               "function timer(fn) { return fn(); }   \n"  // 6
+               "inferred();                           \n"  // 7
+               , "filename.js", 1, &val));
+
+  CHECK(val.isString());
+  JS::RootedString stack(cx, val.toString());
+
+  static const char WebKitStack[] =
+      "@filename.js:3:12\n"
+      "timer@filename.js:6:29\n"
+      "inferred@filename.js:2:11\n"
+      "global code@filename.js:7:1";
+  JSLinearString* lin = stack->ensureLinear(cx);
+  CHECK(lin);
+  CHECK(js::StringEqualsLiteral(lin, WebKitStack));
+
+  return true;
+}
+END_TEST(testSavedStacks_ErrorStackWebKitNames)
+
+BEGIN_TEST(testSavedStacks_ErrorStackWebKitEval) {
+  js::SetStackFormat(cx, js::StackFormat::WebKit);
+
+  JS::RootedValue val(cx);
+  // The top-level frame of a direct eval prints "eval code".
+  CHECK(evaluate("eval(\"new Error('foo').stack\")", "filename.js", 1, &val));
+
+  CHECK(val.isString());
+  JS::RootedString stack(cx, val.toString());
+  JSLinearString* lin = stack->ensureLinear(cx);
+  CHECK(lin);
+
+  JS::AutoCheckCannotGC nogc;
+  const char* chars =
+      reinterpret_cast<const char*>(JS_GetLinearStringChars(lin));
+  CHECK(strstr(chars, "eval code@filename.js:1:"));
+
+  return true;
+}
+END_TEST(testSavedStacks_ErrorStackWebKitEval)
+
 BEGIN_TEST(testSavedStacks_selfHostedFrames) {
   CHECK(js::DefineTestingFunctions(cx, global, false, false));
 
