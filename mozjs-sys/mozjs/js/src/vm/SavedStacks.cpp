@@ -1514,7 +1514,7 @@ static bool FormatWebKitStackFrame(JSContext* cx, js::StringBuilder& sb,
   Rooted<JSAtom*> name(cx, frame->getV8FunctionName());
   return (!indent || sb.appendN(' ', indent)) &&
          (!isAsync || sb.append("async ")) &&
-         (topLevelName ? sb.append(topLevelName)
+         (topLevelName ? sb.append(topLevelName, strlen(topLevelName))
                        : (name ? sb.append(name) : true)) &&
          sb.append('@') && sb.append(frame->getSource()) && sb.append(':') &&
          FormatStackFrameLine(sb, frame) && sb.append(':') &&
