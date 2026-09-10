@@ -758,10 +758,12 @@ static UniqueChars WebKitValueDescription(JSContext* cx, HandleValue v) {
     return WebKitQuotedString(cx, str);
   }
   if (v.isSymbol()) {
-    RootedString str(cx);
-    if (!SymbolDescriptiveString(cx, v.toSymbol(), &str)) {
+    // SymbolDescriptiveString reports into a Value slot holding a string.
+    RootedValue descr(cx);
+    if (!SymbolDescriptiveString(cx, v.toSymbol(), &descr)) {
       return nullptr;
     }
+    RootedString str(cx, descr.toString());
     return StringToNewUTF8CharsZ(cx, *str);
   }
   if (v.isObject()) {
