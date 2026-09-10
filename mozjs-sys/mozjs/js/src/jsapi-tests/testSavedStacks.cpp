@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <cstring>
+
 #include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 
 #include "builtin/TestingFunctions.h"
@@ -285,7 +287,7 @@ BEGIN_TEST(testSavedStacks_ErrorStackWebKitEval) {
   JS::AutoCheckCannotGC nogc;
   const char* chars =
       reinterpret_cast<const char*>(JS_GetLinearStringChars(lin));
-  CHECK(strstr(chars, "eval code@filename.js:1:"));
+  CHECK(std::strstr(chars, "eval code@filename.js:1:"));
 
   return true;
 }

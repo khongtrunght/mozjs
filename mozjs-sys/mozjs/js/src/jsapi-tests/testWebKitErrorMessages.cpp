@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <cstdio>
+#include <cstring>
+
 #include "js/Exception.h"
 #include "js/Stack.h"
 #include "jsapi-tests/tests.h"
@@ -21,8 +24,8 @@ static bool CompareExceptionMessage(JSContext* cx, const char* expected) {
     return false;
   }
   const char* message = report.report()->message().c_str();
-  if (strcmp(message, expected) != 0) {
-    printf("expected: %s\n     got: %s\n", expected, message);
+  if (std::strcmp(message, expected) != 0) {
+    std::printf("expected: %s\n     got: %s\n", expected, message);
     return false;
   }
   return true;
