@@ -32,7 +32,7 @@ index 71908c5..8a46688 100644
   * Capture all frames.
   */
 diff --git a/js/public/friend/ErrorNumbers.msg b/js/public/friend/ErrorNumbers.msg
-index a5b57aa..3e2d4b4 100644
+index a5b57aa..86b95d6 100644
 --- a/js/public/friend/ErrorNumbers.msg
 +++ b/js/public/friend/ErrorNumbers.msg
 @@ -976,4 +976,16 @@ MSG_DEF(JSMSG_ITERATOR_RANGE_STEP_NOT_BIGINT, 0, JSEXN_TYPEERR, "The 'step' argu
@@ -44,7 +44,7 @@ index a5b57aa..3e2d4b4 100644
 +// decompiler, not the original source text.
 +MSG_DEF(JSMSG_WK_NOT_AN_OBJECT, 1, JSEXN_TYPEERR, "{0} is not an object")
 +MSG_DEF(JSMSG_WK_NOT_AN_OBJECT_EXPR, 2, JSEXN_TYPEERR, "{0} is not an object (evaluating '{1}')")
-+MSG_DEF(JSMSG_WK_NOT_A_FUNCTION, 3, JSEXN_TYPEERR, "{0} is not a function. (In '{1}', '{0}' is {2})")
++MSG_DEF(JSMSG_WK_NOT_A_FUNCTION, 4, JSEXN_TYPEERR, "{0} is not a function. (In '{1}', '{2}' is {3})")
 +MSG_DEF(JSMSG_WK_NOT_A_FUNCTION_NOEXPR, 1, JSEXN_TYPEERR, "{0} is not a function")
 +MSG_DEF(JSMSG_WK_NOT_A_CONSTRUCTOR, 2, JSEXN_TYPEERR, "{0} is not a constructor (evaluating '{1}')")
 +MSG_DEF(JSMSG_WK_NOT_A_CONSTRUCTOR_NOEXPR, 1, JSEXN_TYPEERR, "{0} is not a constructor")
@@ -516,7 +516,7 @@ index efe905b..cf7bcef 100644
        }
        ReservedRooted<JSObject*> obj(&rootObject0, &rref.toObject());
 diff --git a/js/src/vm/JSContext.cpp b/js/src/vm/JSContext.cpp
-index 5156259..47537a6 100644
+index 5156259..e1c8751 100644
 --- a/js/src/vm/JSContext.cpp
 +++ b/js/src/vm/JSContext.cpp
 @@ -36,6 +36,7 @@
@@ -583,7 +583,7 @@ index 5156259..47537a6 100644
    if (!JS::Prefs::property_error_message_fix()) {
      ReportIsNullOrUndefinedForPropertyAccess(cx, v, vIndex);
      return;
-@@ -676,6 +700,191 @@ bool js::ReportValueError(JSContext* cx, const unsigned errorNumber,
+@@ -676,6 +700,194 @@ bool js::ReportValueError(JSContext* cx, const unsigned errorNumber,
    return false;
  }
  
@@ -729,9 +729,12 @@ index 5156259..47537a6 100644
 +  }
 +
 +  if (callExpr) {
++    // The callee expression appears twice in the message, but the {N}
++    // expander asserts each declared argument is referenced exactly once,
++    // so it is passed once per occurrence.
 +    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
 +                             JSMSG_WK_NOT_A_FUNCTION, calleeExpr.get(),
-+                             callExpr.get(), valueText);
++                             callExpr.get(), calleeExpr.get(), valueText);
 +  } else {
 +    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
 +                             JSMSG_WK_NOT_A_FUNCTION_NOEXPR, calleeExpr.get());
