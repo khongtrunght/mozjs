@@ -882,7 +882,7 @@ index e14c462..57f3dbf 100644
      JSSLOT_ASYNCCAUSE,
      JSSLOT_PARENT,
 diff --git a/js/src/vm/SavedStacks.cpp b/js/src/vm/SavedStacks.cpp
-index 7c6e8cd..a68fd98 100644
+index 7c6e8cd..5faaf7d 100644
 --- a/js/src/vm/SavedStacks.cpp
 +++ b/js/src/vm/SavedStacks.cpp
 @@ -179,7 +179,8 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
@@ -1023,7 +1023,7 @@ index 7c6e8cd..a68fd98 100644
           (!isAsync || sb.append("async ")) &&
 -         (name ? sb.append(name)
 -               : (!lastFrame || sb.append("global code"))) &&
-+         (topLevelName ? sb.append(topLevelName)
++         (topLevelName ? sb.append(topLevelName, strlen(topLevelName))
 +                       : (name ? sb.append(name) : true)) &&
           sb.append('@') && sb.append(frame->getSource()) && sb.append(':') &&
           FormatStackFrameLine(sb, frame) && sb.append(':') &&
