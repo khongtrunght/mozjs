@@ -2460,6 +2460,124 @@ UniqueChars js::DecompileValueGenerator(JSContext* cx, int spindex,
   return StringToNewUTF8CharsZ(cx, *fallback);
 }
 
+// Shared preamble of the current-pc decompilers below: yields the script and
+// pc of the nearest non-builtin frame when source-level decompilation is
+// possible. Mirrors the guards of DecompileExpressionFromStack; *pcp stays
+// null when decompilation is not possible.
+static bool CurrentDecompilablePC(JSContext* cx,
+                                  MutableHandle<JSScript*> script,
+                                  jsbytecode** pcp) {
+  *pcp = nullptr;
+
+  /*
+   * Give up if we need deterministic behavior for differential testing.
+   */
+  if (js::SupportDifferentialTesting()) {
+    return true;
+  }
+
+  FrameIter iter(cx);
+  if (iter.done() || !iter.hasScript() || iter.realm() != cx->realm() ||
+      iter.inPrologue()) {
+    return true;
+  }
+
+  /*
+   * FIXME: Fall back if iter.isIon(), since the stack snapshot may be for the
+   * previous pc (see bug 831120).
+   */
+  if (iter.isIon()) {
+    return true;
+  }
+
+  script.set(iter.script());
+  *pcp = iter.pc();
+  return true;
+}
+
+template <typename Decompile>
+static UniqueChars DecompileAtCurrentPC(JSContext* cx, Decompile decompile) {
+  RootedScript script(cx);
+  jsbytecode* pc = nullptr;
+  if (!CurrentDecompilablePC(cx, &script, &pc) || !pc) {
+    return nullptr;
+  }
+
+  LifoAllocScope allocScope(&cx->tempLifoAlloc());
+  BytecodeParser parser(cx, allocScope.alloc(), script);
+  if (!parser.parse()) {
+    return nullptr;
+  }
+
+  ExpressionDecompiler ed(cx, script, parser);
+  if (!ed.init()) {
+    return nullptr;
+  }
+  if (!decompile(ed, pc)) {
+    return nullptr;
+  }
+
+  UniqueChars result = ed.getOutput();
+  if (result && strcmp(result.get(), "(intermediate value)") == 0) {
+    return nullptr;
+  }
+  return result;
+}
+
+UniqueChars js::DecompileCurrentExpression(JSContext* cx) {
+  return DecompileAtCurrentPC(
+      cx, [](ExpressionDecompiler& ed, jsbytecode* pc) {
+        return ed.decompilePC(pc, 0);
+      });
+}
+
+UniqueChars js::DecompileCurrentOperand(JSContext* cx, int operandIndex) {
+  return DecompileAtCurrentPC(
+      cx, [operandIndex](ExpressionDecompiler& ed, jsbytecode* pc) {
+        return ed.decompilePCForStackOperand(pc, operandIndex);
+      });
+}
+
+// True for the opcodes whose expression decompiles as a call or `new`
+// ("f(...)", "(new C())", "eval(...)").
+static bool IsCallLikeOp(JSOp op) {
+  switch (op) {
+    case JSOp::Call:
+    case JSOp::CallContent:
+    case JSOp::CallIgnoresRv:
+    case JSOp::CallIter:
+    case JSOp::CallContentIter:
+    case JSOp::SpreadCall:
+    case JSOp::Eval:
+    case JSOp::StrictEval:
+    case JSOp::SpreadEval:
+    case JSOp::StrictSpreadEval:
+    case JSOp::New:
+    case JSOp::NewContent:
+    case JSOp::SpreadNew:
+    case JSOp::SuperCall:
+    case JSOp::SpreadSuperCall:
+      return true;
+    default:
+      return false;
+  }
+}
+
+UniqueChars js::DecompileCurrentCallExpression(JSContext* cx) {
+  RootedScript script(cx);
+  jsbytecode* pc = nullptr;
+  if (!CurrentDecompilablePC(cx, &script, &pc)) {
+    return nullptr;
+  }
+  if (!pc || !IsCallLikeOp(JSOp(*pc))) {
+    return nullptr;
+  }
+  return DecompileAtCurrentPC(
+      cx, [](ExpressionDecompiler& ed, jsbytecode* pc) {
+        return ed.decompilePC(pc, 0);
+      });
+}
+
 static bool DecompileArgumentFromStack(JSContext* cx, int formalIndex,
                                        UniqueChars* res) {
   MOZ_ASSERT(formalIndex >= 0);

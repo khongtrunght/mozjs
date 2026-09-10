@@ -36,6 +36,7 @@
 #include "jit/Simulator.h"
 #include "js/CallAndConstruct.h"  // JS::Call
 #include "js/CharacterEncoding.h"
+#include "js/Conversions.h"  // JS::ToString
 #include "js/ContextOptions.h"        // JS::ContextOptions
 #include "js/ErrorInterceptor.h"      // JSErrorInterceptor
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
@@ -58,12 +59,16 @@
 #include "vm/ErrorObject.h"
 #include "vm/ErrorReporting.h"
 #include "vm/FrameIter.h"
+#include "vm/JSAtomUtils.h"  // js::AtomizeChars
 #include "vm/JSFunction.h"
 #include "vm/JSObject.h"
 #include "vm/PlainObject.h"  // js::PlainObject
+#include "vm/PropertyKey.h"  // js::PropertyKey
 #include "vm/Realm.h"
-#include "vm/StringType.h"  // StringToNewUTF8CharsZ
-#include "vm/ToSource.h"    // js::ValueToSource
+#include "vm/Shape.h"        // js::ShapePropertyIter
+#include "vm/StringType.h"   // StringToNewUTF8CharsZ
+#include "vm/SymbolType.h"   // js::SymbolDescriptiveString
+#include "vm/ToSource.h"     // js::ValueToSource
 
 #include "vm/Compartment-inl.h"
 #include "vm/JSObject-inl.h"
@@ -591,9 +596,19 @@ const char* NullOrUndefinedToCharZ(HandleValue v) {
   return v.isNull() ? "null" : "undefined";
 }
 
+bool js::WebKitErrorMessageEnabled(JSContext* cx) {
+  return cx->runtime()->errorMessageFormat() ==
+         JS::ErrorMessageFormat::WebKit;
+}
+
 void js::ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx, HandleValue v,
                                                   int vIndex) {
   MOZ_ASSERT(v.isNullOrUndefined());
+
+  if (WebKitErrorMessageEnabled(cx)) {
+    ReportWebKitNotAnObject(cx, v, vIndex != JSDVG_IGNORE_STACK);
+    return;
+  }
 
   if (vIndex == JSDVG_IGNORE_STACK) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
@@ -620,6 +635,15 @@ void js::ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx, HandleValue v,
 
 void js::ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx, HandleValue v,
                                                   int vIndex, HandleId key) {
+  MOZ_ASSERT(v.isNullOrUndefined());
+
+  // The WebKit shape prints the whole access expression, so it does not
+  // depend on the property-name fixing pref.
+  if (WebKitErrorMessageEnabled(cx)) {
+    ReportWebKitNotAnObject(cx, v, vIndex != JSDVG_IGNORE_STACK);
+    return;
+  }
+
   MOZ_ASSERT(v.isNullOrUndefined());
 
   if (!JS::Prefs::property_error_message_fix()) {
@@ -674,6 +698,188 @@ bool js::ReportValueError(JSContext* cx, const unsigned errorNumber,
   JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, errorNumber,
                            bytes.get(), arg1, arg2);
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// JavaScriptCore-shaped error messages (JS::ErrorMessageFormat::WebKit),
+// mirroring JSC's errorDescriptionForValue / notAFunctionSourceAppender /
+// defaultSourceAppender in Source/JavaScriptCore/runtime/ExceptionHelpers.cpp.
+// Expression texts come from the bytecode decompiler, so they show
+// decompiled source rather than the original source text.
+// ---------------------------------------------------------------------------
+
+// JSC quotes string values; QuoteString escapes non-printing characters and
+// guarantees ASCII output.
+static UniqueChars WebKitQuotedString(JSContext* cx, JSString* str) {
+  return QuoteString(cx, str, '"');
+}
+
+// JSC JSObject::calculatedClassName: the name of the first own or inherited
+// "constructor" data property holding a named function, falling back to the
+// object's C++ class name. The walk is restricted to native objects so no
+// user code can run while an error is being reported.
+static JSAtom* WebKitCalculatedClassName(JSContext* cx, HandleObject obj) {
+  PropertyKey constructorKey = PropertyKey::NonIntAtom(cx->names().constructor);
+  Rooted<JSObject*> current(cx, obj);
+  while (current && current->is<NativeObject>()) {
+    NativeObject& native = current->as<NativeObject>();
+    for (ShapePropertyIter<NoGC> iter(native.shape()); !iter.done(); iter++) {
+      PropertyInfoWithKey prop = *iter;
+      if (prop.key() != constructorKey) {
+        continue;
+      }
+      if (prop.isDataProperty()) {
+        const Value& value = native.getSlot(prop.slot());
+        if (value.isObject() && value.toObject().is<JSFunction>()) {
+          JSFunction* fun = &value.toObject().as<JSFunction>();
+          if (!fun->isAccessorWithLazyName() && fun->rawAtom() &&
+              fun->rawAtom()->length() != 0) {
+            return fun->rawAtom();
+          }
+        }
+      }
+      break;
+    }
+    current = native.staticPrototype();
+  }
+
+  // Fallback: the receiver's C++ class name ("Object" for plain objects).
+  const char* className = obj->getClass()->name;
+  return AtomizeChars(cx, reinterpret_cast<const Latin1Char*>(className),
+                      strlen(className));
+}
+
+// JSC errorDescriptionForValue: a JSC-shaped description of a value. Objects
+// that are not callable use their calculated class name; strings are quoted.
+// Must never run user code.
+static UniqueChars WebKitValueDescription(JSContext* cx, HandleValue v) {
+  if (v.isString()) {
+    RootedString str(cx, v.toString());
+    return WebKitQuotedString(cx, str);
+  }
+  if (v.isSymbol()) {
+    RootedString str(cx);
+    if (!SymbolDescriptiveString(cx, &v.toSymbol(), &str)) {
+      return nullptr;
+    }
+    return StringToNewUTF8CharsZ(cx, *str);
+  }
+  if (v.isObject()) {
+    Rooted<JSAtom*> name(cx, WebKitCalculatedClassName(cx, &v.toObject()));
+    if (!name) {
+      return nullptr;
+    }
+    RootedString str(cx, name);
+    return StringToNewUTF8CharsZ(cx, *str);
+  }
+
+  // null, undefined, numbers, booleans and BigInts stringify without
+  // invoking user code.
+  RootedString str(cx, JS::ToString(cx, v));
+  if (!str) {
+    return nullptr;
+  }
+  return StringToNewUTF8CharsZ(cx, *str);
+}
+
+void js::ReportWebKitNotAnObject(JSContext* cx, HandleValue v,
+                                 bool haveExpr) {
+  const char* typeName = v.isNull() ? "null" : "undefined";
+  if (haveExpr) {
+    if (UniqueChars expr = DecompileCurrentExpression(cx)) {
+      JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                               JSMSG_WK_NOT_AN_OBJECT_EXPR, typeName,
+                               expr.get());
+      return;
+    }
+  }
+  JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                            JSMSG_WK_NOT_AN_OBJECT, typeName);
+}
+
+bool js::ReportWebKitNotFunction(JSContext* cx, HandleValue v, int spindex,
+                                 bool construct) {
+  // JSC's not-a-function appender cites the callee expression, the call
+  // expression, and a description of the callee value; the not-a-constructor
+  // message describes the value itself.
+  UniqueChars valueDesc = WebKitValueDescription(cx, v);
+  if (!valueDesc) {
+    return false;
+  }
+  UniqueChars callExpr = DecompileCurrentCallExpression(cx);
+
+  if (construct) {
+    if (callExpr) {
+      JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                               JSMSG_WK_NOT_A_CONSTRUCTOR, valueDesc.get(),
+                               callExpr.get());
+    } else {
+      JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                               JSMSG_WK_NOT_A_CONSTRUCTOR_NOEXPR,
+                               valueDesc.get());
+    }
+    return false;
+  }
+
+  UniqueChars calleeExpr =
+      DecompileValueGenerator(cx, spindex, v, nullptr, 0);
+  if (!calleeExpr) {
+    return false;
+  }
+
+  // Symbols always display as "a Symbol" in JSC's appender.
+  UniqueChars symbolDesc;
+  const char* valueText = valueDesc.get();
+  if (v.isSymbol()) {
+    symbolDesc = DuplicateString(cx, "a Symbol");
+    if (!symbolDesc) {
+      return false;
+    }
+    valueText = symbolDesc.get();
+  }
+
+  if (callExpr) {
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                             JSMSG_WK_NOT_A_FUNCTION, calleeExpr.get(),
+                             callExpr.get(), valueText);
+  } else {
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                             JSMSG_WK_NOT_A_FUNCTION_NOEXPR, calleeExpr.get());
+  }
+  return false;
+}
+
+void js::ReportWebKitInNotObject(JSContext* cx, HandleValue rref) {
+  UniqueChars rhsExpr = DecompileCurrentOperand(cx, -1);
+  UniqueChars expr = DecompileCurrentExpression(cx);
+  if (rhsExpr && expr) {
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                             JSMSG_WK_IN_NOT_OBJECT, rhsExpr.get(),
+                             expr.get());
+    return;
+  }
+  JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_IN_NOT_OBJECT,
+                            InformalValueTypeName(rref));
+}
+
+bool js::ReportWebKitInstanceofNotFunction(JSContext* cx, HandleValue rhs,
+                                           const char* content) {
+  UniqueChars rhsExpr = DecompileCurrentOperand(cx, -1);
+  UniqueChars expr = DecompileCurrentExpression(cx);
+  if (rhsExpr && expr) {
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                             JSMSG_WK_INSTANCEOF_NOT_FUNCTION, rhsExpr.get(),
+                             content, expr.get());
+    return false;
+  }
+  // Fall back to the SpiderMonkey shape when no source text is available.
+  ReportValueError(cx, JSMSG_NOT_FUNCTION, JSDVG_SEARCH_STACK, rhs, nullptr);
+  return false;
+}
+
+void js::ReportWebKitInstanceofRhsNotObject(JSContext* cx) {
+  JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                            JSMSG_WK_INSTANCEOF_NOT_OBJECT);
 }
 
 JSObject* js::CreateErrorNotesArray(JSContext* cx, JSErrorReport* report) {

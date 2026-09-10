@@ -1161,6 +1161,10 @@ extern void ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx,
                                                      HandleValue v, int vIndex,
                                                      HandleId key);
 
+// True when JS::SetErrorMessageFormat selected the JavaScriptCore error
+// message shapes.
+extern bool WebKitErrorMessageEnabled(JSContext* cx);
+
 /*
  * Report error using js::DecompileValueGenerator(cx, spindex, v, fallback) as
  * the first argument for the error message.
@@ -1171,6 +1175,28 @@ extern bool ReportValueError(JSContext* cx, const unsigned errorNumber,
                              const char* arg2 = nullptr);
 
 JSObject* CreateErrorNotesArray(JSContext* cx, JSErrorReport* report);
+
+/*
+ * JavaScriptCore-shaped error reporting, selected with
+ * JS::SetErrorMessageFormat(JS::ErrorMessageFormat::WebKit).
+ *
+ * ReportWebKitNotAnObject reports "null/undefined is not an object", with the
+ * decompiled property-access expression in an "(evaluating ...)" clause when
+ * the caller passes a stack index (not JSDVG_IGNORE_STACK) and decompilation
+ * succeeds. ReportWebKitNotFunction reports JSC's not-a-function /
+ * not-a-constructor shapes (and returns false, like ReportIsNotFunction).
+ * ReportWebKitInNotObject and ReportWebKitInstanceofNotFunction report the
+ * `in` and `instanceof` operand errors; the latter falls back to
+ * ReportIsNotFunction when no source text is available.
+ */
+extern void ReportWebKitNotAnObject(JSContext* cx, HandleValue v,
+                                    bool haveExpr);
+extern bool ReportWebKitNotFunction(JSContext* cx, HandleValue v, int spindex,
+                                    bool construct);
+extern void ReportWebKitInNotObject(JSContext* cx, HandleValue rref);
+extern bool ReportWebKitInstanceofNotFunction(JSContext* cx, HandleValue rhs,
+                                              const char* content);
+extern void ReportWebKitInstanceofRhsNotObject(JSContext* cx);
 
 /************************************************************************/
 

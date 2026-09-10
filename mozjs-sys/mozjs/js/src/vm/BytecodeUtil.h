@@ -402,6 +402,26 @@ UniqueChars DecompileValueGenerator(JSContext* cx, int spindex, HandleValue v,
  */
 JSString* DecompileArgument(JSContext* cx, int formalIndex, HandleValue v);
 
+/*
+ * Decompile the expression ending at the nearest non-builtin stack frame's
+ * current pc -- for a property access, call or `new` opcode, the full access
+ * or call expression ("a.b[x]", "f(...)", "(new C())"). These back the
+ * JavaScriptCore-shaped error messages selected with JS::SetErrorMessageFormat.
+ *
+ * DecompileCurrentOperand does the same for a single stack operand of that pc
+ * (operandIndex follows decompilePCForStackOperand's conventions, so -1 is the
+ * top of the stack). DecompileCurrentCallExpression only decompiles call and
+ * `new` opcodes, so an error raised away from the call site does not cite
+ * unrelated text.
+ *
+ * Return null when no source-level text is available (no interpreter frame,
+ * Ion frames, differential testing, a non-call opcode for the call variant).
+ * The caller must call JS_free on the result after a successful call.
+ */
+UniqueChars DecompileCurrentExpression(JSContext* cx);
+UniqueChars DecompileCurrentOperand(JSContext* cx, int operandIndex);
+UniqueChars DecompileCurrentCallExpression(JSContext* cx);
+
 static inline unsigned GetOpLength(JSOp op) {
   MOZ_ASSERT(uint8_t(op) < JSOP_LIMIT);
   MOZ_ASSERT(CodeSpec(op).length > 0);

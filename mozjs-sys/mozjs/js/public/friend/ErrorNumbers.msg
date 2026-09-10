@@ -976,4 +976,16 @@ MSG_DEF(JSMSG_ITERATOR_RANGE_STEP_NOT_BIGINT, 0, JSEXN_TYPEERR, "The 'step' argu
 MSG_DEF(JSMSG_SUMPRECISE_TOO_MANY_VALUES, 0, JSEXN_RANGEERR, "too many values passed to Math.sumPrecise")
 MSG_DEF(JSMSG_SUMPRECISE_EXPECTED_NUMBER, 0, JSEXN_TYPEERR, "values passed to Math.sumPrecise must be numbers")
 
+// WebKit (JavaScriptCore) error message shapes, selected with
+// JS::SetErrorMessageFormat. The expression texts use SpiderMonkey's bytecode
+// decompiler, not the original source text.
+MSG_DEF(JSMSG_WK_NOT_AN_OBJECT, 1, JSEXN_TYPEERR, "{0} is not an object")
+MSG_DEF(JSMSG_WK_NOT_AN_OBJECT_EXPR, 2, JSEXN_TYPEERR, "{0} is not an object (evaluating '{1}')")
+MSG_DEF(JSMSG_WK_NOT_A_FUNCTION, 3, JSEXN_TYPEERR, "{0} is not a function. (In '{1}', '{0}' is {2})")
+MSG_DEF(JSMSG_WK_NOT_A_FUNCTION_NOEXPR, 1, JSEXN_TYPEERR, "{0} is not a function")
+MSG_DEF(JSMSG_WK_NOT_A_CONSTRUCTOR, 2, JSEXN_TYPEERR, "{0} is not a constructor (evaluating '{1}')")
+MSG_DEF(JSMSG_WK_NOT_A_CONSTRUCTOR_NOEXPR, 1, JSEXN_TYPEERR, "{0} is not a constructor")
+MSG_DEF(JSMSG_WK_IN_NOT_OBJECT, 2, JSEXN_TYPEERR, "{0} is not an Object. (evaluating '{1}')")
+MSG_DEF(JSMSG_WK_INSTANCEOF_NOT_FUNCTION, 3, JSEXN_TYPEERR, "{0}{1}. (evaluating '{2}')")
+MSG_DEF(JSMSG_WK_INSTANCEOF_NOT_OBJECT, 0, JSEXN_TYPEERR, "Right hand side of instanceof is not an object")
 //clang-format on

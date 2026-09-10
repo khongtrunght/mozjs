@@ -29,6 +29,7 @@
 #include "vm/BytecodeLocation.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/EqualityOperations.h"
+#include "vm/JSContext.h"
 #include "vm/JSFunction.h"
 #include "vm/JSScript.h"
 #include "vm/Opcodes.h"
@@ -2035,7 +2036,11 @@ bool DoInstanceOfFallback(JSContext* cx, BaselineFrame* frame,
   FallbackICSpew(cx, stub, "InstanceOf");
 
   if (!rhs.isObject()) {
-    ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS, -1, rhs, nullptr);
+    if (WebKitErrorMessageEnabled(cx)) {
+      ReportWebKitInstanceofRhsNotObject(cx);
+    } else {
+      ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS, -1, rhs, nullptr);
+    }
     return false;
   }
 

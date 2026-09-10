@@ -90,6 +90,28 @@ extern JS_PUBLIC_API void SetNativeFunctionSourceFormat(
 extern JS_PUBLIC_API NativeFunctionSourceFormat
 GetNativeFunctionSourceFormat(JSContext* cx);
 
+enum class ErrorMessageFormat { SpiderMonkey, WebKit };
+
+/**
+ * Select the message text for common runtime errors: property access on
+ * null/undefined, calling a non-function, and `new` on a non-constructor.
+ * SpiderMonkey (the default) keeps SpiderMonkey's wording. WebKit formats
+ * these errors the way JavaScriptCore does, e.g.
+ * "null is not an object (evaluating 'null.x')" and
+ * "({}).foo is not a function. (In '({}).foo()', '({}).foo' is undefined)".
+ * The '(evaluating ...)' / (In ...) clauses use SpiderMonkey's bytecode
+ * expression decompiler, so they show decompiled source text rather than the
+ * original source, and are omitted when no source text is available.
+ * Like SetStackFormat, this setting belongs to the root runtime and is
+ * inherited by child runtimes. The setter must be called on the root
+ * runtime's context.
+ */
+extern JS_PUBLIC_API void SetErrorMessageFormat(JSContext* cx,
+                                                ErrorMessageFormat format);
+
+extern JS_PUBLIC_API ErrorMessageFormat
+GetErrorMessageFormat(JSContext* cx);
+
 /**
  * Capture all frames.
  */

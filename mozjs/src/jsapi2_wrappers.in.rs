@@ -168,6 +168,8 @@ wrap!(jsapi: pub fn RealmCreationOptionsRef1(cx: &JSContext) -> *const RealmCrea
 wrap!(jsapi: pub fn RealmBehaviorsRef1(cx: &JSContext) -> *const RealmBehaviors);
 wrap!(jsapi: pub fn SetNativeFunctionSourceFormat(cx: &JSContext, format: NativeFunctionSourceFormat));
 wrap!(jsapi: pub fn GetNativeFunctionSourceFormat(cx: &JSContext) -> NativeFunctionSourceFormat);
+wrap!(jsapi: pub fn SetErrorMessageFormat(cx: &JSContext, format: ErrorMessageFormat));
+wrap!(jsapi: pub fn GetErrorMessageFormat(cx: &JSContext) -> ErrorMessageFormat);
 wrap!(jsapi: pub fn CaptureCurrentStack(cx: &mut JSContext, stackp: MutableHandleObject, capture: *mut StackCapture, startAfter: HandleObject) -> bool);
 wrap!(jsapi: pub fn IsAsyncStackCaptureEnabledForRealm(cx: &JSContext) -> bool);
 wrap!(jsapi: pub fn BuildStackString(cx: &mut JSContext, principals: *mut JSPrincipals, stack: HandleObject, stringp: MutableHandleString, indent: usize, stackFormat: StackFormat) -> bool);

@@ -1028,6 +1028,8 @@ struct JSRuntime {
   mozilla::Atomic<js::StackFormat, mozilla::ReleaseAcquire> stackFormat_;
   mozilla::Atomic<JS::NativeFunctionSourceFormat, mozilla::ReleaseAcquire>
       nativeFunctionSourceFormat_{JS::NativeFunctionSourceFormat::SpiderMonkey};
+  mozilla::Atomic<JS::ErrorMessageFormat, mozilla::ReleaseAcquire>
+      errorMessageFormat_{JS::ErrorMessageFormat::SpiderMonkey};
 
  public:
   js::StackFormat stackFormat() const {
@@ -1055,6 +1057,18 @@ struct JSRuntime {
   void setNativeFunctionSourceFormat(JS::NativeFunctionSourceFormat format) {
     MOZ_ASSERT(!parentRuntime);
     nativeFunctionSourceFormat_ = format;
+  }
+
+  JS::ErrorMessageFormat errorMessageFormat() const {
+    const JSRuntime* rt = this;
+    while (rt->parentRuntime) {
+      rt = rt->parentRuntime;
+    }
+    return rt->errorMessageFormat_;
+  }
+  void setErrorMessageFormat(JS::ErrorMessageFormat format) {
+    MOZ_ASSERT(!parentRuntime);
+    errorMessageFormat_ = format;
   }
 
  private:

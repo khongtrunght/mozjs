@@ -93,6 +93,8 @@ def grep_heur2(file_path: Path) -> list[str]:
             or "JS_DequeueNextMicroTask" in sig
             or "SetNativeFunctionSourceFormat" in sig
             or "GetNativeFunctionSourceFormat" in sig
+            or "SetErrorMessageFormat" in sig
+            or "GetErrorMessageFormat" in sig
         ):
             sig = sig.replace("&mut JSContext", "&JSContext")
         return sig

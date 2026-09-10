@@ -5156,6 +5156,16 @@ JS_PUBLIC_API JS::NativeFunctionSourceFormat JS::GetNativeFunctionSourceFormat(
   return cx->runtime()->nativeFunctionSourceFormat();
 }
 
+JS_PUBLIC_API void JS::SetErrorMessageFormat(JSContext* cx,
+                                             JS::ErrorMessageFormat format) {
+  cx->runtime()->setErrorMessageFormat(format);
+}
+
+JS_PUBLIC_API JS::ErrorMessageFormat JS::GetErrorMessageFormat(
+    JSContext* cx) {
+  return cx->runtime()->errorMessageFormat();
+}
+
 JS_PUBLIC_API void JS::SetMeasuringExecutionTimeEnabled(JSContext* cx,
                                                         bool value) {
   cx->setMeasuringExecutionTimeEnabled(value);

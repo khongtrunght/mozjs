@@ -170,8 +170,12 @@ bool ForwardingProxyHandler::construct(JSContext* cx, HandleObject proxy,
 
   RootedValue target(cx, proxy->as<ProxyObject>().private_());
   if (!IsConstructor(target)) {
-    ReportValueError(cx, JSMSG_NOT_CONSTRUCTOR, JSDVG_IGNORE_STACK, target,
-                     nullptr);
+    if (WebKitErrorMessageEnabled(cx)) {
+      ReportWebKitNotFunction(cx, target, JSDVG_IGNORE_STACK, true);
+    } else {
+      ReportValueError(cx, JSMSG_NOT_CONSTRUCTOR, JSDVG_IGNORE_STACK, target,
+                       nullptr);
+    }
     return false;
   }
 

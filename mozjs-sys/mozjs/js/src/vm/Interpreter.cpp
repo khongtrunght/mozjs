@@ -294,6 +294,12 @@ bool js::GetImportOperation(JSContext* cx, HandleObject envChain,
 
 bool js::ReportIsNotFunction(JSContext* cx, HandleValue v, int numToSkip,
                              MaybeConstruct construct) {
+  if (WebKitErrorMessageEnabled(cx)) {
+    return ReportWebKitNotFunction(
+        cx, v, numToSkip >= 0 ? -(numToSkip + 1) : JSDVG_SEARCH_STACK,
+        construct == CONSTRUCT);
+  }
+
   unsigned error = construct ? JSMSG_NOT_CONSTRUCTOR : JSMSG_NOT_FUNCTION;
   int spIndex = numToSkip >= 0 ? -(numToSkip + 1) : JSDVG_SEARCH_STACK;
 
@@ -747,6 +753,9 @@ static bool StackCheckIsConstructorCalleeNewTarget(JSContext* cx,
                                                    HandleValue newTarget) {
   // Calls from the stack could have any old non-constructor callee.
   if (!IsConstructor(callee)) {
+    if (WebKitErrorMessageEnabled(cx)) {
+      return ReportWebKitNotFunction(cx, callee, JSDVG_SEARCH_STACK, true);
+    }
     ReportValueError(cx, JSMSG_NOT_CONSTRUCTOR, JSDVG_SEARCH_STACK, callee,
                      nullptr);
     return false;
@@ -905,6 +914,11 @@ bool js::InstanceofOperator(JSContext* cx, HandleObject obj, HandleValue v,
 
   if (!hasInstance.isNullOrUndefined()) {
     if (!IsCallable(hasInstance)) {
+      if (WebKitErrorMessageEnabled(cx)) {
+        return ReportWebKitInstanceofNotFunction(
+            cx, hasInstance,
+            "[Symbol.hasInstance] is not a function, undefined, or null");
+      }
       return ReportIsNotFunction(cx, hasInstance);
     }
 
@@ -920,6 +934,9 @@ bool js::InstanceofOperator(JSContext* cx, HandleObject obj, HandleValue v,
   /* Step 4. */
   if (!obj->isCallable()) {
     RootedValue val(cx, ObjectValue(*obj));
+    if (WebKitErrorMessageEnabled(cx)) {
+      return ReportWebKitInstanceofNotFunction(cx, val, " is not a function");
+    }
     return ReportIsNotFunction(cx, val);
   }
 
@@ -1617,6 +1634,13 @@ void js::ReportInNotObjectError(JSContext* cx, HandleValue lref,
     }
     JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_IN_STRING,
                              lbytes.get(), rbytes.get());
+    return;
+  }
+
+  // The WebKit shape cites the operand expressions, so it only applies to
+  // the not-an-object case; the string/string error is SpiderMonkey's own.
+  if (WebKitErrorMessageEnabled(cx)) {
+    ReportWebKitInNotObject(cx, rref);
     return;
   }
 
@@ -4055,7 +4079,11 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
     CASE(Instanceof) {
       ReservedRooted<Value> rref(&rootValue0, REGS.sp[-1]);
       if (HandleValue(rref).isPrimitive()) {
-        ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS, -1, rref, nullptr);
+        if (WebKitErrorMessageEnabled(cx)) {
+          ReportWebKitInstanceofRhsNotObject(cx);
+        } else {
+          ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS, -1, rref, nullptr);
+        }
         goto error;
       }
       ReservedRooted<JSObject*> obj(&rootObject0, &rref.toObject());
