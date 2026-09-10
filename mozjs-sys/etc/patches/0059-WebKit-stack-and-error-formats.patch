@@ -516,7 +516,7 @@ index efe905b..cf7bcef 100644
        }
        ReservedRooted<JSObject*> obj(&rootObject0, &rref.toObject());
 diff --git a/js/src/vm/JSContext.cpp b/js/src/vm/JSContext.cpp
-index 5156259..e233c8e 100644
+index 5156259..7a87a61 100644
 --- a/js/src/vm/JSContext.cpp
 +++ b/js/src/vm/JSContext.cpp
 @@ -36,6 +36,7 @@
@@ -583,7 +583,7 @@ index 5156259..e233c8e 100644
    if (!JS::Prefs::property_error_message_fix()) {
      ReportIsNullOrUndefinedForPropertyAccess(cx, v, vIndex);
      return;
-@@ -676,6 +700,188 @@ bool js::ReportValueError(JSContext* cx, const unsigned errorNumber,
+@@ -676,6 +700,189 @@ bool js::ReportValueError(JSContext* cx, const unsigned errorNumber,
    return false;
  }
  
@@ -646,13 +646,14 @@ index 5156259..e233c8e 100644
 +  }
 +  if (v.isSymbol()) {
 +    RootedString str(cx);
-+    if (!SymbolDescriptiveString(cx, &v.toSymbol(), &str)) {
++    if (!SymbolDescriptiveString(cx, v.toSymbol(), &str)) {
 +      return nullptr;
 +    }
 +    return StringToNewUTF8CharsZ(cx, *str);
 +  }
 +  if (v.isObject()) {
-+    Rooted<JSAtom*> name(cx, WebKitCalculatedClassName(cx, &v.toObject()));
++    RootedObject obj(cx, &v.toObject());
++    Rooted<JSAtom*> name(cx, WebKitCalculatedClassName(cx, obj));
 +    if (!name) {
 +      return nullptr;
 +    }
