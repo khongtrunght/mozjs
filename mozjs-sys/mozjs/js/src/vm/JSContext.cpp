@@ -842,9 +842,12 @@ bool js::ReportWebKitNotFunction(JSContext* cx, HandleValue v, int spindex,
   }
 
   if (callExpr) {
+    // The callee expression appears twice in the message, but the {N}
+    // expander asserts each declared argument is referenced exactly once,
+    // so it is passed once per occurrence.
     JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
                              JSMSG_WK_NOT_A_FUNCTION, calleeExpr.get(),
-                             callExpr.get(), valueText);
+                             callExpr.get(), calleeExpr.get(), valueText);
   } else {
     JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
                              JSMSG_WK_NOT_A_FUNCTION_NOEXPR, calleeExpr.get());

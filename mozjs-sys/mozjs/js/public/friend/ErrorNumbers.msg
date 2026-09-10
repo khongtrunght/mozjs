@@ -981,7 +981,7 @@ MSG_DEF(JSMSG_SUMPRECISE_EXPECTED_NUMBER, 0, JSEXN_TYPEERR, "values passed to Ma
 // decompiler, not the original source text.
 MSG_DEF(JSMSG_WK_NOT_AN_OBJECT, 1, JSEXN_TYPEERR, "{0} is not an object")
 MSG_DEF(JSMSG_WK_NOT_AN_OBJECT_EXPR, 2, JSEXN_TYPEERR, "{0} is not an object (evaluating '{1}')")
-MSG_DEF(JSMSG_WK_NOT_A_FUNCTION, 3, JSEXN_TYPEERR, "{0} is not a function. (In '{1}', '{0}' is {2})")
+MSG_DEF(JSMSG_WK_NOT_A_FUNCTION, 4, JSEXN_TYPEERR, "{0} is not a function. (In '{1}', '{2}' is {3})")
 MSG_DEF(JSMSG_WK_NOT_A_FUNCTION_NOEXPR, 1, JSEXN_TYPEERR, "{0} is not a function")
 MSG_DEF(JSMSG_WK_NOT_A_CONSTRUCTOR, 2, JSEXN_TYPEERR, "{0} is not a constructor (evaluating '{1}')")
 MSG_DEF(JSMSG_WK_NOT_A_CONSTRUCTOR_NOEXPR, 1, JSEXN_TYPEERR, "{0} is not a constructor")
