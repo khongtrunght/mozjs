@@ -759,13 +759,14 @@ static UniqueChars WebKitValueDescription(JSContext* cx, HandleValue v) {
   }
   if (v.isSymbol()) {
     RootedString str(cx);
-    if (!SymbolDescriptiveString(cx, &v.toSymbol(), &str)) {
+    if (!SymbolDescriptiveString(cx, v.toSymbol(), &str)) {
       return nullptr;
     }
     return StringToNewUTF8CharsZ(cx, *str);
   }
   if (v.isObject()) {
-    Rooted<JSAtom*> name(cx, WebKitCalculatedClassName(cx, &v.toObject()));
+    RootedObject obj(cx, &v.toObject());
+    Rooted<JSAtom*> name(cx, WebKitCalculatedClassName(cx, obj));
     if (!name) {
       return nullptr;
     }
