@@ -164,6 +164,22 @@ bool JS::ObjectOpResult::reportError(JSContext* cx, HandleObject obj,
   MOZ_ASSERT(!ok());
   cx->check(obj);
 
+  // JavaScriptCore reports a failed delete or a write to a read-only property
+  // without naming the property (JSObject.cpp UnableToDeletePropertyError,
+  // ReadonlyPropertyWriteError).
+  if (WebKitErrorMessageEnabled(cx)) {
+    if (code_ == JSMSG_CANT_DELETE) {
+      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                JSMSG_WK_CANT_DELETE);
+      return false;
+    }
+    if (code_ == JSMSG_READ_ONLY) {
+      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                JSMSG_WK_READ_ONLY);
+      return false;
+    }
+  }
+
   if (code_ == JSMSG_OBJECT_NOT_EXTENSIBLE) {
     RootedValue val(cx, ObjectValue(*obj));
     return ReportValueError(cx, code_, JSDVG_IGNORE_STACK, val, nullptr);

@@ -74,6 +74,19 @@ BEGIN_TEST(testWebKitErrorMessages) {
   CHECK(ExpectThrowMessage(cx, evaluate("'a' in 1", "test.js", 1, &rval),
                            "1 is not an Object. (evaluating '(\"a\" in 1)')"));
 
+  CHECK(ExpectThrowMessage(
+      cx,
+      evaluate("'use strict'; var o = {}; Object.defineProperty(o, 'p', "
+               "{value: 1}); delete o.p",
+               "test.js", 1, &rval),
+      "Unable to delete property."));
+
+  CHECK(ExpectThrowMessage(
+      cx,
+      evaluate("'use strict'; var o = Object.freeze({p: 1}); o.p = 2",
+               "test.js", 1, &rval),
+      "Attempted to assign to readonly property."));
+
   JS::SetErrorMessageFormat(cx, JS::ErrorMessageFormat::SpiderMonkey);
   CHECK(JS::GetErrorMessageFormat(cx) == JS::ErrorMessageFormat::SpiderMonkey);
 

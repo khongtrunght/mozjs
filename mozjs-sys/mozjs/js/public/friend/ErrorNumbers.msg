@@ -988,4 +988,8 @@ MSG_DEF(JSMSG_WK_NOT_A_CONSTRUCTOR_NOEXPR, 1, JSEXN_TYPEERR, "{0} is not a const
 MSG_DEF(JSMSG_WK_IN_NOT_OBJECT, 2, JSEXN_TYPEERR, "{0} is not an Object. (evaluating '{1}')")
 MSG_DEF(JSMSG_WK_INSTANCEOF_NOT_FUNCTION, 3, JSEXN_TYPEERR, "{0}{1}. (evaluating '{2}')")
 MSG_DEF(JSMSG_WK_INSTANCEOF_NOT_OBJECT, 0, JSEXN_TYPEERR, "Right hand side of instanceof is not an object")
+// JSC JSObject.cpp UnableToDeletePropertyError / ReadonlyPropertyWriteError:
+// a failed strict-mode delete or write names no property.
+MSG_DEF(JSMSG_WK_CANT_DELETE, 0, JSEXN_TYPEERR, "Unable to delete property.")
+MSG_DEF(JSMSG_WK_READ_ONLY, 0, JSEXN_TYPEERR, "Attempted to assign to readonly property.")
 //clang-format on
