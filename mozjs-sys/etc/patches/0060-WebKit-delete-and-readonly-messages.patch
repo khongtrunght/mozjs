@@ -1,0 +1,64 @@
+diff --git a/js/public/friend/ErrorNumbers.msg b/js/public/friend/ErrorNumbers.msg
+index 86b95d6..094b91e 100644
+--- a/js/public/friend/ErrorNumbers.msg
++++ b/js/public/friend/ErrorNumbers.msg
+@@ -988,4 +988,8 @@ MSG_DEF(JSMSG_WK_NOT_A_CONSTRUCTOR_NOEXPR, 1, JSEXN_TYPEERR, "{0} is not a const
+ MSG_DEF(JSMSG_WK_IN_NOT_OBJECT, 2, JSEXN_TYPEERR, "{0} is not an Object. (evaluating '{1}')")
+ MSG_DEF(JSMSG_WK_INSTANCEOF_NOT_FUNCTION, 3, JSEXN_TYPEERR, "{0}{1}. (evaluating '{2}')")
+ MSG_DEF(JSMSG_WK_INSTANCEOF_NOT_OBJECT, 0, JSEXN_TYPEERR, "Right hand side of instanceof is not an object")
++// JSC JSObject.cpp UnableToDeletePropertyError / ReadonlyPropertyWriteError:
++// a failed strict-mode delete or write names no property.
++MSG_DEF(JSMSG_WK_CANT_DELETE, 0, JSEXN_TYPEERR, "Unable to delete property.")
++MSG_DEF(JSMSG_WK_READ_ONLY, 0, JSEXN_TYPEERR, "Attempted to assign to readonly property.")
+ //clang-format on
+diff --git a/js/src/jsapi-tests/testWebKitErrorMessages.cpp b/js/src/jsapi-tests/testWebKitErrorMessages.cpp
+index 32873e1..caca4a3 100644
+--- a/js/src/jsapi-tests/testWebKitErrorMessages.cpp
++++ b/js/src/jsapi-tests/testWebKitErrorMessages.cpp
+@@ -74,6 +74,19 @@ BEGIN_TEST(testWebKitErrorMessages) {
+   CHECK(ExpectThrowMessage(cx, evaluate("'a' in 1", "test.js", 1, &rval),
+                            "1 is not an Object. (evaluating '(\"a\" in 1)')"));
+ 
++  CHECK(ExpectThrowMessage(
++      cx,
++      evaluate("'use strict'; var o = {}; Object.defineProperty(o, 'p', "
++               "{value: 1}); delete o.p",
++               "test.js", 1, &rval),
++      "Unable to delete property."));
++
++  CHECK(ExpectThrowMessage(
++      cx,
++      evaluate("'use strict'; var o = Object.freeze({p: 1}); o.p = 2",
++               "test.js", 1, &rval),
++      "Attempted to assign to readonly property."));
++
+   JS::SetErrorMessageFormat(cx, JS::ErrorMessageFormat::SpiderMonkey);
+   CHECK(JS::GetErrorMessageFormat(cx) == JS::ErrorMessageFormat::SpiderMonkey);
+ 
+diff --git a/js/src/jsapi.cpp b/js/src/jsapi.cpp
+index 03e2a73..472eaf6 100644
+--- a/js/src/jsapi.cpp
++++ b/js/src/jsapi.cpp
+@@ -164,6 +164,22 @@ bool JS::ObjectOpResult::reportError(JSContext* cx, HandleObject obj,
+   MOZ_ASSERT(!ok());
+   cx->check(obj);
+ 
++  // JavaScriptCore reports a failed delete or a write to a read-only property
++  // without naming the property (JSObject.cpp UnableToDeletePropertyError,
++  // ReadonlyPropertyWriteError).
++  if (WebKitErrorMessageEnabled(cx)) {
++    if (code_ == JSMSG_CANT_DELETE) {
++      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
++                                JSMSG_WK_CANT_DELETE);
++      return false;
++    }
++    if (code_ == JSMSG_READ_ONLY) {
++      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
++                                JSMSG_WK_READ_ONLY);
++      return false;
++    }
++  }
++
+   if (code_ == JSMSG_OBJECT_NOT_EXTENSIBLE) {
+     RootedValue val(cx, ObjectValue(*obj));
+     return ReportValueError(cx, code_, JSDVG_IGNORE_STACK, val, nullptr);
