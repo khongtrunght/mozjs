@@ -212,5 +212,31 @@ fn capture_stack() {
         assert!(stack
             .lines()
             .any(|line| line.starts_with("    at async fn (v8_async.js:2:")));
+
+        // JavaScriptCore names a frame only by the function's own or
+        // spec-inferred name, and prints its URL stripped for a report: no
+        // credentials, query or fragment.
+        SetStackFormat(context, StackFormat::WebKit);
+        let options = CompileOptionsWrapper::new(
+            context,
+            c"https://user:pw@example.com/a.js?v=1#frag".to_owned(),
+            1,
+        );
+        evaluate_script(
+            context,
+            global.handle(),
+            "var self = {}; self.f = function() { return new Error().stack; };\n\
+             var o = {func: function() { return self.f(); }};\no.func()",
+            rval.handle_mut(),
+            options,
+        )
+        .unwrap();
+        let stack = jsstr_to_string(context, NonNull::new(rval.get().to_string()).unwrap());
+        println!("WebKit: {stack:?}");
+        let frames: Vec<&str> = stack.lines().collect();
+        assert_eq!(frames.len(), 3, "{stack}");
+        assert!(frames[0].starts_with("@https://example.com/a.js:1:"), "{stack}");
+        assert!(frames[1].starts_with("func@https://example.com/a.js:2:"), "{stack}");
+        assert!(frames[2].starts_with("global code@https://example.com/a.js:3:"), "{stack}");
     }
 }

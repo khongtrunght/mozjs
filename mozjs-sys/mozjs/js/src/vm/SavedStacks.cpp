@@ -1489,6 +1489,60 @@ static bool FormatV8StackFrame(JSContext* cx, js::StringBuilder& sb,
 // frames print "global code", "module code" and "eval code". The name is the
 // same one captured for V8 mode; SpiderMonkey's diagnostic guessed names
 // ("enclosing/<") are never printed. Async frames keep the "async " prefix.
+// JavaScriptCore prints a frame's source URL as
+// URL::strippedForUseAsReport() (StackFrame::sourceURLStripped): the
+// credentials, the query and the fragment are dropped from a valid URL, and
+// any other string is printed as it is.
+static bool AppendWebKitReportURL(js::StringBuilder& sb, JSAtom* source) {
+  size_t length = source->length();
+  auto at = [&](size_t i) { return source->latin1OrTwoByteChar(i); };
+  auto isAlpha = [](char16_t c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+  };
+  size_t schemeEnd = 0;
+  if (length && isAlpha(at(0))) {
+    for (size_t i = 1; i < length; i++) {
+      char16_t c = at(i);
+      if (c == ':') {
+        schemeEnd = i;
+        break;
+      }
+      if (!isAlpha(c) && !(c >= '0' && c <= '9') && c != '+' && c != '-' &&
+          c != '.') {
+        break;
+      }
+    }
+  }
+  if (!schemeEnd) {
+    return sb.append(source);
+  }
+  size_t pathStart = schemeEnd + 1;
+  size_t userStart = pathStart;
+  size_t credentialsEnd = pathStart;
+  if (pathStart + 1 < length && at(pathStart) == '/' &&
+      at(pathStart + 1) == '/') {
+    userStart = pathStart + 2;
+    size_t authorityEnd = userStart;
+    while (authorityEnd < length && at(authorityEnd) != '/' &&
+           at(authorityEnd) != '?' && at(authorityEnd) != '#') {
+      authorityEnd++;
+    }
+    credentialsEnd = userStart;
+    for (size_t i = userStart; i < authorityEnd; i++) {
+      if (at(i) == '@') {
+        credentialsEnd = i + 1;
+      }
+    }
+    pathStart = authorityEnd;
+  }
+  size_t pathEnd = pathStart;
+  while (pathEnd < length && at(pathEnd) != '?' && at(pathEnd) != '#') {
+    pathEnd++;
+  }
+  return sb.appendSubstring(source, 0, userStart) &&
+         sb.appendSubstring(source, credentialsEnd, pathEnd - credentialsEnd);
+}
+
 static bool FormatWebKitStackFrame(JSContext* cx, js::StringBuilder& sb,
                                    JS::Handle<js::SavedFrame*> frame,
                                    size_t indent, bool skippedAsync,
@@ -1516,8 +1570,8 @@ static bool FormatWebKitStackFrame(JSContext* cx, js::StringBuilder& sb,
          (!isAsync || sb.append("async ")) &&
          (topLevelName ? sb.append(topLevelName, strlen(topLevelName))
                        : (name ? sb.append(name) : true)) &&
-         sb.append('@') && sb.append(frame->getSource()) && sb.append(':') &&
-         FormatStackFrameLine(sb, frame) && sb.append(':') &&
+         sb.append('@') && AppendWebKitReportURL(sb, frame->getSource()) &&
+         sb.append(':') && FormatStackFrameLine(sb, frame) && sb.append(':') &&
          FormatStackFrameColumn(sb, frame) && (lastFrame || sb.append('\n'));
 }
 
@@ -2057,7 +2111,12 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandle<SavedFrame*> frame,
       JSFunction* fun = iter.calleeTemplate();
       constructing = iter.isConstructing();
       v8Name = fun->fullExplicitOrInferredName();
-      if (fun->hasGuessedAtom() &&
+      // JavaScriptCore names a frame by the function's own or spec-inferred
+      // name only (StackFrame::functionName, getCalculatedDisplayName): a
+      // function assigned to a property path such as `self.f = function(){}`
+      // prints as "@url:line:column", not V8's "self.f@...".
+      if (cx->runtime()->stackFormat() != js::StackFormat::WebKit &&
+          fun->hasGuessedAtom() &&
           iter.script()->hasFlag(
               MutableScriptFlagsEnum::HasPropertyAssignmentName)) {
         // NameFunctions qualifies diagnostics with enclosing scopes separated

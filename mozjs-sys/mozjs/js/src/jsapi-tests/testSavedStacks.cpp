@@ -148,6 +148,50 @@ BEGIN_TEST(testSavedStacks_RangeBasedForLoops) {
 }
 END_TEST(testSavedStacks_RangeBasedForLoops)
 
+// JavaScriptCore prints each frame's URL stripped for a report (no
+// credentials, query or fragment) and names a frame only by the function's
+// own or spec-inferred name, never by the property path it was assigned to.
+BEGIN_TEST(testSavedStacks_WebKitURLAndNames) {
+  CHECK(js::DefineTestingFunctions(cx, global, false, false));
+  js::SetStackFormat(cx, js::StackFormat::WebKit);
+
+  JS::RootedValue val(cx);
+  CHECK(evaluate("var self = {};                \n"   // 1
+                 "self.f = function () {        \n"   // 2
+                 "  return saveStack();         \n"   // 3
+                 "};                            \n"   // 4
+                 "var o = {func: function () {  \n"   // 5
+                 "  return self.f(); }};        \n"   // 6
+                 "o.func();                     \n",  // 7
+                 "https://user:pw@example.com/a.js?v=1#frag", 1, &val));
+  CHECK(val.isObject());
+  JS::RootedObject savedFrame(cx, &val.toObject());
+
+  JS::RootedString str(cx);
+  CHECK(JS::BuildStackString(cx, cx->realm()->principals(), savedFrame, &str,
+                             0, js::StackFormat::WebKit));
+  JS::UniqueChars chars = JS_EncodeStringToUTF8(cx, str);
+  CHECK(chars);
+  // Columns are SpiderMonkey's; names, URLs and lines are what this checks.
+  const char* expected[] = {"@https://example.com/a.js:3:",
+                            "func@https://example.com/a.js:6:",
+                            "global code@https://example.com/a.js:7:"};
+  const char* line = chars.get();
+  for (const char* prefix : expected) {
+    CHECK(line);
+    CHECK(strncmp(line, prefix, strlen(prefix)) == 0);
+    line = strchr(line, '\n');
+    if (line) {
+      line++;
+    }
+  }
+  CHECK(!line);
+
+  js::SetStackFormat(cx, js::StackFormat::SpiderMonkey);
+  return true;
+}
+END_TEST(testSavedStacks_WebKitURLAndNames)
+
 BEGIN_TEST(testSavedStacks_ErrorStackSpiderMonkey) {
   JS::RootedValue val(cx);
   CHECK(
