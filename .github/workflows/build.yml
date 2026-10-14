@@ -94,6 +94,7 @@ jobs:
     env:
       RUSTC_WRAPPER: "sccache"
       CCACHE: sccache
+      SCCACHE_GHA_ENABLED: "true"
     strategy:
       fail-fast: false
       matrix:
@@ -124,10 +125,6 @@ jobs:
           directory: ${{ runner.temp }}/llvm
       - name: Set LIBCLANG_PATH
         run: echo "LIBCLANG_PATH=${LLVM_PATH}/lib" >> $GITHUB_ENV
-      - name: Select sccache backend
-        # Self-hosted keeps a persistent local SCCACHE_DIR instead of the GHA cache.
-        if: ${{ runner.environment == 'github-hosted' }}
-        run: echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: Build
