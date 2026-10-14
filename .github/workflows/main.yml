@@ -12,17 +12,18 @@ on:
 # dispatches build workflow with different permissions
 jobs:
   build:
-    if: ${{ github.event_name != 'push' }}
+    # Forks skip the weekly full-matrix run: it costs thousands of minutes.
+    if: ${{ github.event_name != 'push' && (github.event_name != 'schedule' || github.repository == 'servo/mozjs') }}
     uses: ./.github/workflows/build.yml
     secrets: inherit
   latest_stable_rust:
-    if: ${{ github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' && github.repository == 'servo/mozjs' }}
     uses: ./.github/workflows/build.yml
     with:
       rust_version: "stable"
     secrets: inherit
   latest_beta_rust:
-    if: ${{ github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' && github.repository == 'servo/mozjs' }}
     uses: ./.github/workflows/build.yml
     with:
       rust_version: "beta"
