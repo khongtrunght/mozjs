@@ -235,8 +235,17 @@ fn capture_stack() {
         println!("WebKit: {stack:?}");
         let frames: Vec<&str> = stack.lines().collect();
         assert_eq!(frames.len(), 3, "{stack}");
-        assert!(frames[0].starts_with("@https://example.com/a.js:1:"), "{stack}");
-        assert!(frames[1].starts_with("func@https://example.com/a.js:2:"), "{stack}");
-        assert!(frames[2].starts_with("global code@https://example.com/a.js:3:"), "{stack}");
+        assert!(
+            frames[0].starts_with("@https://example.com/a.js:1:"),
+            "{stack}"
+        );
+        assert!(
+            frames[1].starts_with("func@https://example.com/a.js:2:"),
+            "{stack}"
+        );
+        assert!(
+            frames[2].starts_with("global code@https://example.com/a.js:3:"),
+            "{stack}"
+        );
     }
 }
